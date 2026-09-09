@@ -50,6 +50,30 @@ class _ScannerScreenState extends ConsumerState<ScannerScreen> {
     }
   }
 
+  Future<void> _restartCamera() async {
+    try {
+      await _scannerController?.dispose();
+    } catch (_) {}
+    if (mounted) {
+      setState(() {
+        _scannerController = MobileScannerController(
+          formats: const [
+            BarcodeFormat.ean13,
+            BarcodeFormat.ean8,
+            BarcodeFormat.upcA,
+            BarcodeFormat.upcE,
+            BarcodeFormat.code128,
+            BarcodeFormat.code39,
+            BarcodeFormat.qrCode,
+          ],
+          detectionSpeed: DetectionSpeed.normal,
+          facing: CameraFacing.back,
+          torchEnabled: false,
+        );
+      });
+    }
+  }
+
   @override
   void dispose() {
     _manualBarcodeController.dispose();
@@ -183,14 +207,7 @@ class _ScannerScreenState extends ConsumerState<ScannerScreen> {
                           ),
                           const SizedBox(height: 16),
                           ElevatedButton.icon(
-                            onPressed: () async {
-                              try {
-                                await _scannerController?.stop();
-                                await _scannerController?.start();
-                              } catch (e) {
-                                debugPrint('Camera retry: $e');
-                              }
-                            },
+                            onPressed: _restartCamera,
                             icon: const Icon(Icons.refresh_rounded, size: 18),
                             label: const Text('Allow / Retry Camera'),
                             style: ElevatedButton.styleFrom(
