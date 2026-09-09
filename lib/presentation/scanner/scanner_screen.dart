@@ -159,6 +159,51 @@ class _ScannerScreenState extends ConsumerState<ScannerScreen> {
               child: MobileScanner(
                 controller: _scannerController!,
                 onDetect: _onBarcodeDetected,
+                errorBuilder: (context, error, child) {
+                  return Container(
+                    color: Colors.black,
+                    padding: const EdgeInsets.all(24),
+                    child: Center(
+                      child: Column(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          const Icon(Icons.videocam_off_rounded, color: Colors.amber, size: 52),
+                          const SizedBox(height: 12),
+                          const Text(
+                            'Camera Access Required',
+                            style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 16),
+                          ),
+                          const SizedBox(height: 8),
+                          Text(
+                            error.errorCode == MobileScannerErrorCode.permissionDenied
+                                ? 'Camera permission was denied. Please allow camera access in your phone Settings to scan medicine barcodes.'
+                                : 'Unable to start camera: ${error.errorDetails?.message ?? error.errorCode.name}',
+                            textAlign: TextAlign.center,
+                            style: const TextStyle(color: Colors.white70, fontSize: 12),
+                          ),
+                          const SizedBox(height: 16),
+                          ElevatedButton.icon(
+                            onPressed: () async {
+                              try {
+                                await _scannerController?.stop();
+                                await _scannerController?.start();
+                              } catch (e) {
+                                debugPrint('Camera retry: $e');
+                              }
+                            },
+                            icon: const Icon(Icons.refresh_rounded, size: 18),
+                            label: const Text('Allow / Retry Camera'),
+                            style: ElevatedButton.styleFrom(
+                              backgroundColor: AppColors.primary,
+                              foregroundColor: Colors.white,
+                              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  );
+                },
               ),
             ),
 
