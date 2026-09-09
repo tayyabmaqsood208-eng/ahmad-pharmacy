@@ -893,15 +893,8 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
   }
 
   Future<void> _importBackup(BuildContext context, WidgetRef ref) async {
-    try {
-      final result = await FilePicker.pickFiles(type: FileType.any);
-      if (result != null && result.files.isNotEmpty && context.mounted) {
-        ToastHelper.showInfo(context, 'Database backup file loaded');
-      }
-    } catch (e) {
-      if (context.mounted) {
-        ToastHelper.showError(context, 'Import error: $e');
-      }
+    if (context.mounted) {
+      ToastHelper.showInfo(context, 'Database restore: place backup in app data directory.');
     }
   }
 }
