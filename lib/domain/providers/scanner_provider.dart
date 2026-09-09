@@ -461,7 +461,7 @@ class ScannerClientNotifier extends StateNotifier<ScannerClientState> {
     return connect(
       ip: '127.0.0.1',
       port: 8089,
-      token: token,
+      token: token.isNotEmpty ? token : 'usb',
       deviceName: 'Mobile Scanner (USB Cable)',
     );
   }

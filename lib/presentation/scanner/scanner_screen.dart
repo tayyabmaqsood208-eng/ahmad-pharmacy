@@ -47,6 +47,34 @@ class _ScannerScreenState extends ConsumerState<ScannerScreen> {
         facing: CameraFacing.back,
         torchEnabled: false,
       );
+    } else {
+      // Running on Desktop (Windows) or Web without camera:
+      // Auto-initialize POS server and auto-pair desktop simulator
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        _autoConnectDesktopSimulator();
+      });
+    }
+  }
+
+  Future<void> _autoConnectDesktopSimulator() async {
+    final serverNotifier = ref.read(scannerServerProvider.notifier);
+    var serverState = ref.read(scannerServerProvider);
+    if (!serverState.isRunning) {
+      await serverNotifier.startServer();
+      serverState = ref.read(scannerServerProvider);
+    }
+    if (mounted) {
+      _tokenController.text = serverState.pairingToken;
+      _ipController.text = '127.0.0.1';
+    }
+    final client = ref.read(scannerClientProvider);
+    if (!client.isConnected && !client.isConnecting) {
+      await ref.read(scannerClientProvider.notifier).connect(
+        ip: '127.0.0.1',
+        port: serverState.port,
+        token: serverState.pairingToken,
+        deviceName: 'Desktop Scanner Simulator',
+      );
     }
   }
 
@@ -115,9 +143,15 @@ class _ScannerScreenState extends ConsumerState<ScannerScreen> {
     }
   }
 
-  void _handleManualBarcodeSubmit() {
+  Future<void> _handleManualBarcodeSubmit() async {
     final code = _manualBarcodeController.text.trim();
     if (code.isEmpty) return;
+
+    var clientState = ref.read(scannerClientProvider);
+    if (!clientState.isConnected && !_isCameraSupported) {
+      await _autoConnectDesktopSimulator();
+      clientState = ref.read(scannerClientProvider);
+    }
 
     final sent = ref.read(scannerClientProvider.notifier).sendBarcode(code);
     if (sent) {
@@ -126,22 +160,33 @@ class _ScannerScreenState extends ConsumerState<ScannerScreen> {
       _manualBarcodeController.clear();
       setState(() => _showManualEntry = false);
     } else {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Please connect to POS terminal first')),
-      );
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Please connect to POS terminal first')),
+        );
+      }
     }
   }
 
   void _handleManualPairingSubmit() {
     final ip = _ipController.text.trim();
     final port = int.tryParse(_portController.text.trim()) ?? 8089;
-    final token = _tokenController.text.trim();
+    var token = _tokenController.text.trim();
 
     if (ip.isEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text('Please enter terminal IP address')),
       );
       return;
+    }
+
+    if (token.isEmpty && (ip == '127.0.0.1' || ip == 'localhost')) {
+      final serverToken = ref.read(scannerServerProvider).pairingToken;
+      if (serverToken.isNotEmpty) {
+        token = serverToken;
+      } else {
+        token = 'usb';
+      }
     }
 
     ref.read(scannerClientProvider.notifier).connect(
@@ -154,7 +199,15 @@ class _ScannerScreenState extends ConsumerState<ScannerScreen> {
   }
 
   void _handleUsbConnect() {
-    final token = _tokenController.text.trim();
+    var token = _tokenController.text.trim();
+    if (token.isEmpty) {
+      final serverToken = ref.read(scannerServerProvider).pairingToken;
+      if (serverToken.isNotEmpty) {
+        token = serverToken;
+      } else {
+        token = 'usb';
+      }
+    }
     ref.read(scannerClientProvider.notifier).connectUsb(token: token);
     setState(() => _showManualPairing = false);
   }

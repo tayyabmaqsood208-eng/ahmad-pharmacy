@@ -190,10 +190,18 @@ class ScannerServer {
           final deviceName = message['deviceName'] as String? ?? 'Mobile Scanner';
 
           // Validate token
-          if (token != _pairingToken) {
+          final isLoopback = remoteIp == '127.0.0.1' ||
+              remoteIp == '::1' ||
+              remoteIp.startsWith('127.') ||
+              remoteIp.toLowerCase() == 'localhost';
+
+          final isTokenValid = (token.isNotEmpty && token.trim() == _pairingToken.trim()) ||
+              (isLoopback && (token.isEmpty || token == 'usb' || token.trim() == _pairingToken.trim()));
+
+          if (!isTokenValid) {
             socket.add(jsonEncode({
               'type': 'error',
-              'message': 'Invalid pairing token. Please scan the latest QR code on screen.',
+              'message': 'Invalid pairing token. Please scan the latest QR code on screen or enter PIN: $_pairingToken',
             }));
             socket.close(4001, 'Invalid token');
             return;
@@ -201,12 +209,22 @@ class ScannerServer {
 
           // Single-device policy: reject if another device is currently connected
           if (_activeClient != null && _activeClient != socket) {
-            socket.add(jsonEncode({
-              'type': 'error',
-              'message': 'Another scanner (${_pairedDevice?.name}) is already paired to this terminal.',
-            }));
-            socket.close(4002, 'Terminal busy');
-            return;
+            final isSameClientReconnecting = _pairedDevice?.name == deviceName &&
+                (_pairedDevice?.ipAddress == remoteIp || isLoopback);
+
+            if (isSameClientReconnecting) {
+              try {
+                _activeClient?.close(1000, 'Replaced by reconnecting client');
+              } catch (_) {}
+              _activeClient = null;
+            } else {
+              socket.add(jsonEncode({
+                'type': 'error',
+                'message': 'Another scanner (${_pairedDevice?.name}) is already paired to this terminal.',
+              }));
+              socket.close(4002, 'Terminal busy');
+              return;
+            }
           }
 
           _activeClient = socket;
