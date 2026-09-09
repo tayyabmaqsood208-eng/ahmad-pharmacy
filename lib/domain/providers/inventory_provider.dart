@@ -7,7 +7,7 @@ final inventoryRepositoryProvider = Provider((ref) => InventoryRepository());
 
 final inventoryFilterStatusProvider = StateProvider<String>((ref) => 'All');
 final inventorySearchQueryProvider = StateProvider<String>((ref) => '');
-final inventoryTabProvider = StateProvider<String>((ref) => 'All Medicines');
+final inventoryTabProvider = StateProvider<String>((ref) => 'All Products');
 final inventoryDosageFilterProvider = StateProvider<String>((ref) => 'All');
 
 final allBatchesProvider = FutureProvider<List<Batch>>((ref) async {

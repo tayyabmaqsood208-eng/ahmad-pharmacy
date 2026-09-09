@@ -32,21 +32,25 @@ class SkeletonTableLoader extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Column(
-      children: List.generate(
-        rows,
-        (index) => Padding(
-          padding: const EdgeInsets.symmetric(vertical: 8),
-          child: Row(
-            children: const [
-              SkeletonLoader(width: 40, height: 40, borderRadius: 10),
-              SizedBox(width: 16),
-              Expanded(child: SkeletonLoader(height: 20)),
-              SizedBox(width: 16),
-              SkeletonLoader(width: 100, height: 20),
-              SizedBox(width: 16),
-              SkeletonLoader(width: 80, height: 20),
-            ],
+    return SingleChildScrollView(
+      physics: const NeverScrollableScrollPhysics(),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: List.generate(
+          rows,
+          (index) => Padding(
+            padding: const EdgeInsets.symmetric(vertical: 8),
+            child: Row(
+              children: const [
+                SkeletonLoader(width: 40, height: 40, borderRadius: 10),
+                SizedBox(width: 16),
+                Expanded(child: SkeletonLoader(height: 20)),
+                SizedBox(width: 16),
+                SkeletonLoader(width: 100, height: 20),
+                SizedBox(width: 16),
+                SkeletonLoader(width: 80, height: 20),
+              ],
+            ),
           ),
         ),
       ),

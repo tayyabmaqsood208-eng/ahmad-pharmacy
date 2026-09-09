@@ -863,7 +863,8 @@ class _InventoryScreenState extends ConsumerState<InventoryScreen> {
     required String selectedTab,
   }) {
     final isSelected = selectedTab == tabKey;
-    return Expanded(
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 4),
       child: InkWell(
         borderRadius: BorderRadius.circular(8),
         onTap: () {
@@ -871,7 +872,7 @@ class _InventoryScreenState extends ConsumerState<InventoryScreen> {
         },
         child: AnimatedContainer(
           duration: const Duration(milliseconds: 150),
-          padding: const EdgeInsets.symmetric(vertical: 10),
+          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
           decoration: BoxDecoration(
             color: isSelected ? AppColors.primary : Colors.transparent,
             borderRadius: BorderRadius.circular(8),
