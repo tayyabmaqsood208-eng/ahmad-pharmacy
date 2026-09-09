@@ -56,6 +56,12 @@ class DatabaseHelper {
       await db.execute("ALTER TABLE medicines ADD COLUMN product_type TEXT DEFAULT 'Medicine'");
     } catch (_) {}
     try {
+      await db.execute('ALTER TABLE medicines ADD COLUMN barcode TEXT');
+    } catch (_) {}
+    try {
+      await db.execute('CREATE INDEX IF NOT EXISTS idx_medicines_barcode ON medicines (barcode)');
+    } catch (_) {}
+    try {
       await db.execute("UPDATE settings SET currency_symbol = 'Rs'");
     } catch (_) {}
     try {
@@ -81,6 +87,7 @@ class DatabaseHelper {
         name TEXT NOT NULL,
         generic_name TEXT,
         sku TEXT,
+        barcode TEXT,
         category TEXT,
         dosage_form TEXT,
         unit TEXT,
@@ -96,6 +103,7 @@ class DatabaseHelper {
         product_type TEXT DEFAULT 'Medicine'
       )
     ''');
+    await db.execute('CREATE INDEX IF NOT EXISTS idx_medicines_barcode ON medicines (barcode)');
 
     // 2. Batches (FEFO support)
     await db.execute('''

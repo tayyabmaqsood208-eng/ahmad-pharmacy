@@ -107,6 +107,14 @@ class SidebarNavigation extends ConsumerWidget {
                 _buildSectionHeader(isCollapsed, 'SYSTEM'),
                 _buildNavItem(
                   ref: ref,
+                  icon: Icons.qr_code_scanner_rounded,
+                  label: 'Scanner Mode',
+                  screen: NavScreen.scanner,
+                  activeScreen: navState.currentScreen,
+                  isCollapsed: isCollapsed,
+                ),
+                _buildNavItem(
+                  ref: ref,
                   icon: Icons.settings_rounded,
                   label: 'Settings',
                   screen: NavScreen.settings,

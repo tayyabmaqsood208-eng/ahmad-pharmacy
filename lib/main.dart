@@ -19,6 +19,7 @@ import 'presentation/sales/sales_screen.dart';
 import 'presentation/customers/customers_screen.dart';
 import 'presentation/reports/reports_screen.dart';
 import 'presentation/settings/settings_screen.dart';
+import 'presentation/scanner/scanner_screen.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -120,6 +121,8 @@ class MainShellScreen extends ConsumerWidget {
         return const ReportsScreen(key: ValueKey('reports'));
       case NavScreen.settings:
         return const SettingsScreen(key: ValueKey('settings'));
+      case NavScreen.scanner:
+        return const ScannerScreen(key: ValueKey('scanner'));
     }
   }
 }

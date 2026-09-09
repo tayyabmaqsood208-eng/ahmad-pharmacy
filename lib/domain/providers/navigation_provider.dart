@@ -11,6 +11,7 @@ enum NavScreen {
   customers,
   reports,
   settings,
+  scanner,
 }
 
 class NavigationState {

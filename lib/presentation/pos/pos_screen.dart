@@ -13,6 +13,9 @@ import '../../core/widgets/skeleton_loader.dart';
 import '../../core/widgets/empty_state_widget.dart';
 import 'customer_select_dialog.dart';
 import 'receipt_modal.dart';
+import '../../domain/providers/scanner_provider.dart';
+import 'widgets/scanner_pairing_dialog.dart';
+import 'package:uuid/uuid.dart';
 
 class PosScreen extends ConsumerStatefulWidget {
   const PosScreen({super.key});
@@ -24,6 +27,14 @@ class PosScreen extends ConsumerStatefulWidget {
 class _PosScreenState extends ConsumerState<PosScreen> {
   final TextEditingController _searchController = TextEditingController();
   int _narrowViewTab = 0; // 0: Catalog, 1: Cart (for screens < 880px)
+
+  @override
+  void initState() {
+    super.initState();
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      ref.read(scannerServerProvider.notifier).startServer();
+    });
+  }
 
   @override
   void dispose() {
@@ -38,6 +49,15 @@ class _PosScreenState extends ConsumerState<PosScreen> {
     final cartState = ref.watch(posCartProvider);
     final settingsVal = ref.watch(settingsProvider).value;
     final currency = settingsVal?.currencySymbol ?? 'Rs';
+
+    // Listen for incoming unrecognized barcodes from mobile scanner
+    ref.listen<ScannerServerState>(scannerServerProvider, (previous, next) {
+      if (next.lastUnknownBarcode != null &&
+          next.lastUnknownBarcode != previous?.lastUnknownBarcode) {
+        final unknownCode = next.lastUnknownBarcode!;
+        _showUnknownBarcodeDialog(context, ref, unknownCode);
+      }
+    });
 
     return LayoutBuilder(
       builder: (context, constraints) {
@@ -308,6 +328,42 @@ class _PosScreenState extends ConsumerState<PosScreen> {
                   ),
                 ),
               ],
+              const SizedBox(width: 8),
+              OutlinedButton.icon(
+                onPressed: () => ScannerPairingDialog.show(context),
+                icon: Icon(
+                  ref.watch(scannerServerProvider).hasPairedDevice
+                      ? Icons.phonelink_ring_rounded
+                      : Icons.qr_code_scanner_rounded,
+                  size: 16,
+                  color: ref.watch(scannerServerProvider).hasPairedDevice
+                      ? AppColors.success
+                      : AppColors.primary,
+                ),
+                label: Text(
+                  ref.watch(scannerServerProvider).hasPairedDevice
+                      ? 'Scanner Active'
+                      : 'Mobile Scan',
+                  style: TextStyle(
+                    fontSize: 11,
+                    fontWeight: FontWeight.bold,
+                    color: ref.watch(scannerServerProvider).hasPairedDevice
+                        ? AppColors.success
+                        : AppColors.primary,
+                  ),
+                ),
+                style: OutlinedButton.styleFrom(
+                  padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 12),
+                  side: BorderSide(
+                    color: ref.watch(scannerServerProvider).hasPairedDevice
+                        ? AppColors.success
+                        : AppColors.primary.withValues(alpha: 0.5),
+                  ),
+                  backgroundColor: ref.watch(scannerServerProvider).hasPairedDevice
+                      ? AppColors.successLight.withValues(alpha: 0.25)
+                      : null,
+                ),
+              ),
             ],
           ),
           const SizedBox(height: 10),
@@ -889,6 +945,52 @@ class _PosScreenState extends ConsumerState<PosScreen> {
               backgroundColor: Colors.white,
               padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 7),
               side: BorderSide(color: AppColors.primary.withValues(alpha: 0.3)),
+            ),
+          ),
+          const SizedBox(width: 6),
+          InkWell(
+            onTap: () => ScannerPairingDialog.show(context),
+            borderRadius: BorderRadius.circular(8),
+            child: Container(
+              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
+              decoration: BoxDecoration(
+                color: ref.watch(scannerServerProvider).hasPairedDevice
+                    ? AppColors.successLight
+                    : Colors.white,
+                borderRadius: BorderRadius.circular(8),
+                border: Border.all(
+                  color: ref.watch(scannerServerProvider).hasPairedDevice
+                      ? AppColors.success
+                      : AppColors.primary.withValues(alpha: 0.3),
+                ),
+              ),
+              child: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Icon(
+                    ref.watch(scannerServerProvider).hasPairedDevice
+                        ? Icons.phonelink_ring_rounded
+                        : Icons.qr_code_scanner_rounded,
+                    size: 13,
+                    color: ref.watch(scannerServerProvider).hasPairedDevice
+                        ? AppColors.success
+                        : AppColors.primary,
+                  ),
+                  const SizedBox(width: 4),
+                  Text(
+                    ref.watch(scannerServerProvider).hasPairedDevice
+                        ? 'Scanner Active'
+                        : 'Scanner',
+                    style: TextStyle(
+                      fontSize: 11,
+                      fontWeight: FontWeight.bold,
+                      color: ref.watch(scannerServerProvider).hasPairedDevice
+                          ? const Color(0xFF15803D)
+                          : AppColors.primary,
+                    ),
+                  ),
+                ],
+              ),
             ),
           ),
         ],
@@ -1510,6 +1612,246 @@ class _PosScreenState extends ConsumerState<PosScreen> {
       ),
     );
   }
+
+  void _showUnknownBarcodeDialog(
+    BuildContext context,
+    WidgetRef ref,
+    String barcode,
+  ) {
+    showDialog(
+      context: context,
+      barrierDismissible: false,
+      builder: (ctx) => AlertDialog(
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+        title: Row(
+          children: [
+            Container(
+              padding: const EdgeInsets.all(8),
+              decoration: BoxDecoration(
+                color: Colors.amber.withValues(alpha: 0.15),
+                borderRadius: BorderRadius.circular(8),
+              ),
+              child: const Icon(Icons.qr_code_scanner_rounded, color: Colors.amber, size: 24),
+            ),
+            const SizedBox(width: 12),
+            const Expanded(
+              child: Text(
+                'Unrecognized Barcode',
+                style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16),
+              ),
+            ),
+          ],
+        ),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(
+              'A mobile scanner sent barcode "$barcode", but no matching item was found in your offline medicine database.',
+              style: const TextStyle(fontSize: 13),
+            ),
+            const SizedBox(height: 14),
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+              decoration: BoxDecoration(
+                color: Theme.of(context).cardColor,
+                borderRadius: BorderRadius.circular(10),
+                border: Border.all(color: AppColors.getBorder(context)),
+              ),
+              child: Row(
+                children: [
+                  const Icon(Icons.barcode_reader, size: 20, color: AppColors.primary),
+                  const SizedBox(width: 10),
+                  SelectableText(
+                    barcode,
+                    style: const TextStyle(
+                      fontWeight: FontWeight.bold,
+                      fontSize: 15,
+                      letterSpacing: 1.2,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ],
+        ),
+        actions: [
+          TextButton(
+            onPressed: () {
+              ref.read(scannerServerProvider.notifier).clearUnknownBarcode();
+              Navigator.of(ctx).pop();
+            },
+            child: const Text('Dismiss', style: TextStyle(color: AppColors.textSecondary)),
+          ),
+          ElevatedButton.icon(
+            onPressed: () {
+              ref.read(scannerServerProvider.notifier).clearUnknownBarcode();
+              Navigator.of(ctx).pop();
+              _showQuickAddMedicineDialog(context, ref, barcode);
+            },
+            icon: const Icon(Icons.add_rounded, size: 16),
+            label: const Text('Create Medicine Record'),
+            style: ElevatedButton.styleFrom(
+              backgroundColor: AppColors.primary,
+              foregroundColor: Colors.white,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  void _showQuickAddMedicineDialog(
+    BuildContext context,
+    WidgetRef ref,
+    String barcode,
+  ) {
+    final nameCtrl = TextEditingController();
+    final genericCtrl = TextEditingController();
+    final categoryCtrl = TextEditingController(text: 'General');
+    final dosageCtrl = TextEditingController(text: 'Tablet');
+    final unitCtrl = TextEditingController(text: 'Box');
+    final priceCtrl = TextEditingController(text: '50.0');
+    final costCtrl = TextEditingController(text: '35.0');
+    final packSizeCtrl = TextEditingController(text: '10');
+
+    showDialog(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+        title: const Text('Register Scanned Medicine', style: TextStyle(fontWeight: FontWeight.bold)),
+        content: SizedBox(
+          width: 440,
+          child: SingleChildScrollView(
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                  decoration: BoxDecoration(
+                    color: AppColors.primaryLight.withValues(alpha: 0.3),
+                    borderRadius: BorderRadius.circular(8),
+                  ),
+                  child: Row(
+                    children: [
+                      const Icon(Icons.qr_code_rounded, size: 16, color: AppColors.primary),
+                      const SizedBox(width: 8),
+                      Text('Barcode: $barcode', style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 12, color: AppColors.primaryDark)),
+                    ],
+                  ),
+                ),
+                const SizedBox(height: 12),
+                TextField(
+                  controller: nameCtrl,
+                  decoration: const InputDecoration(labelText: 'Medicine Name *', isDense: true),
+                  autofocus: true,
+                ),
+                const SizedBox(height: 10),
+                TextField(
+                  controller: genericCtrl,
+                  decoration: const InputDecoration(labelText: 'Generic Formula', isDense: true),
+                ),
+                const SizedBox(height: 10),
+                Row(
+                  children: [
+                    Expanded(
+                      child: TextField(
+                        controller: dosageCtrl,
+                        decoration: const InputDecoration(labelText: 'Dosage Form', isDense: true),
+                      ),
+                    ),
+                    const SizedBox(width: 10),
+                    Expanded(
+                      child: TextField(
+                        controller: packSizeCtrl,
+                        decoration: const InputDecoration(labelText: 'Pack Size (Tabs)', isDense: true),
+                        keyboardType: TextInputType.number,
+                      ),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 10),
+                Row(
+                  children: [
+                    Expanded(
+                      child: TextField(
+                        controller: priceCtrl,
+                        decoration: const InputDecoration(labelText: 'Retail Price (Rs) *', isDense: true),
+                        keyboardType: TextInputType.number,
+                      ),
+                    ),
+                    const SizedBox(width: 10),
+                    Expanded(
+                      child: TextField(
+                        controller: costCtrl,
+                        decoration: const InputDecoration(labelText: 'Cost Price (Rs)', isDense: true),
+                        keyboardType: TextInputType.number,
+                      ),
+                    ),
+                  ],
+                ),
+              ],
+            ),
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(ctx).pop(),
+            child: const Text('Cancel'),
+          ),
+          ElevatedButton(
+            onPressed: () async {
+              final name = nameCtrl.text.trim();
+              if (name.isEmpty) {
+                ToastHelper.showError(context, 'Please enter medicine name');
+                return;
+              }
+              final price = double.tryParse(priceCtrl.text.trim()) ?? 0.0;
+              final cost = double.tryParse(costCtrl.text.trim()) ?? 0.0;
+              final packSize = int.tryParse(packSizeCtrl.text.trim()) ?? 10;
+
+              final newMed = Medicine(
+                id: const Uuid().v4(),
+                name: name,
+                genericName: genericCtrl.text.trim(),
+                sku: barcode,
+                barcode: barcode,
+                category: categoryCtrl.text.trim(),
+                dosageForm: dosageCtrl.text.trim(),
+                unit: unitCtrl.text.trim(),
+                packSize: packSize,
+                minStock: 10,
+                location: 'Main Rack',
+                defaultPrice: price,
+                defaultCostPrice: cost,
+                totalStock: 50,
+              );
+
+              await ref.read(medicineRepoProvider).addMedicine(newMed);
+              ref.invalidate(medicinesListProvider);
+
+              // Auto-add newly registered product to active POS cart
+              ref.read(posCartProvider.notifier).addItem(
+                newMed,
+                isFullBox: !newMed.isTabletOrPack,
+                quantity: 1,
+              );
+
+              if (ctx.mounted) Navigator.of(ctx).pop();
+              if (context.mounted) {
+                ToastHelper.showSuccess(context, 'Created and added ${newMed.name} to bill!');
+              }
+            },
+            style: ElevatedButton.styleFrom(
+              backgroundColor: AppColors.primary,
+              foregroundColor: Colors.white,
+            ),
+            child: const Text('Save & Add to Bill'),
+          ),
+        ],
+      ),
+    );
+  }
 }
 
 class _MedicineCardItem extends ConsumerStatefulWidget {
@@ -1926,4 +2268,5 @@ class _MedicineCardItemState extends ConsumerState<_MedicineCardItem> {
     );
   }
 }
+
 

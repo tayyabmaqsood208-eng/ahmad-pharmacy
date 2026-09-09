@@ -16,8 +16,8 @@ class MedicineRepository {
 
     if (query != null && query.trim().isNotEmpty) {
       final q = '%${query.trim().toLowerCase()}%';
-      whereClause += " AND (LOWER(m.name) LIKE ? OR LOWER(m.generic_name) LIKE ? OR LOWER(m.sku) LIKE ? OR LOWER(COALESCE(m.salt_composition, '')) LIKE ?)";
-      whereArgs.addAll([q, q, q, q]);
+      whereClause += " AND (LOWER(m.name) LIKE ? OR LOWER(m.generic_name) LIKE ? OR LOWER(m.sku) LIKE ? OR LOWER(COALESCE(m.barcode, '')) LIKE ? OR LOWER(COALESCE(m.salt_composition, '')) LIKE ?)";
+      whereArgs.addAll([q, q, q, q, q]);
     }
 
     if (category != null && category != 'All' && category.isNotEmpty) {
@@ -58,6 +58,31 @@ class MedicineRepository {
       GROUP BY m.id
     ''';
     final List<Map<String, dynamic>> maps = await db.rawQuery(rawQuery, [id]);
+    if (maps.isNotEmpty) {
+      final totalStock = (maps.first['total_stock'] as num).toInt();
+      return Medicine.fromMap(maps.first, totalStock: totalStock);
+    }
+    return null;
+  }
+
+  Future<Medicine?> getMedicineByBarcode(String barcode) async {
+    final cleanCode = barcode.trim();
+    if (cleanCode.isEmpty) return null;
+
+    final db = await _dbHelper.database;
+    final String rawQuery = '''
+      SELECT m.*, COALESCE(SUM(b.quantity), 0) as total_stock
+      FROM medicines m
+      LEFT JOIN batches b ON m.id = b.medicine_id
+      WHERE LOWER(m.barcode) = ? OR LOWER(m.sku) = ?
+      GROUP BY m.id
+      LIMIT 1
+    ''';
+    final List<Map<String, dynamic>> maps = await db.rawQuery(
+      rawQuery,
+      [cleanCode.toLowerCase(), cleanCode.toLowerCase()],
+    );
+
     if (maps.isNotEmpty) {
       final totalStock = (maps.first['total_stock'] as num).toInt();
       return Medicine.fromMap(maps.first, totalStock: totalStock);

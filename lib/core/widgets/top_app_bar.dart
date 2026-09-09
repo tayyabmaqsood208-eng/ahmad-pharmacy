@@ -152,6 +152,8 @@ class TopAppBar extends ConsumerWidget {
         return 'Reports & Analytics';
       case NavScreen.settings:
         return 'System Settings';
+      case NavScreen.scanner:
+        return 'Mobile Barcode Scanner';
     }
   }
 }

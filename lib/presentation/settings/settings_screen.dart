@@ -7,6 +7,8 @@ import '../../domain/providers/medicine_provider.dart';
 import '../../domain/providers/inventory_provider.dart';
 import '../../domain/providers/sales_provider.dart';
 import '../../domain/providers/report_provider.dart';
+import '../../domain/providers/scanner_provider.dart';
+import '../pos/widgets/scanner_pairing_dialog.dart';
 import '../../core/theme/app_colors.dart';
 import '../../core/database/database_helper.dart';
 import '../../core/utils/toast_helper.dart';
@@ -239,6 +241,141 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
                                 ),
                               ),
                             ],
+                          ),
+                        ],
+                      ),
+                    ),
+                  ),
+
+                  const SizedBox(height: 16),
+
+                  // Section: Wireless Mobile Barcode Scanner (Offline Gateway)
+                  Container(
+                    decoration: BoxDecoration(
+                      color: Theme.of(context).cardColor,
+                      borderRadius: BorderRadius.circular(16),
+                      border: Border.all(color: AppColors.getBorder(context)),
+                      boxShadow: [
+                        BoxShadow(
+                          color: Colors.black.withValues(alpha: 0.03),
+                          blurRadius: 10,
+                          offset: const Offset(0, 3),
+                        ),
+                      ],
+                    ),
+                    child: Padding(
+                      padding: const EdgeInsets.all(20),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Row(
+                            children: [
+                              Container(
+                                padding: const EdgeInsets.all(8),
+                                decoration: BoxDecoration(
+                                  color: ref.watch(scannerServerProvider).hasPairedDevice
+                                      ? AppColors.successLight
+                                      : AppColors.primaryLight,
+                                  shape: BoxShape.circle,
+                                ),
+                                child: Icon(
+                                  ref.watch(scannerServerProvider).hasPairedDevice
+                                      ? Icons.phonelink_ring_rounded
+                                      : Icons.qr_code_scanner_rounded,
+                                  color: ref.watch(scannerServerProvider).hasPairedDevice
+                                      ? AppColors.success
+                                      : AppColors.primary,
+                                  size: 18,
+                                ),
+                              ),
+                              const SizedBox(width: 10),
+                              Expanded(
+                                child: Column(
+                                  crossAxisAlignment: CrossAxisAlignment.start,
+                                  children: [
+                                    Text(
+                                      'Wireless Mobile Barcode Scanner',
+                                      style: TextStyle(
+                                        fontSize: 16,
+                                        fontWeight: FontWeight.bold,
+                                        color: AppColors.getTextPrimary(context),
+                                      ),
+                                    ),
+                                    Text(
+                                      'Use any mobile phone as a wireless camera scanner over local Wi-Fi or Hotspot (100% offline).',
+                                      style: TextStyle(fontSize: 11, color: AppColors.getTextSecondary(context)),
+                                    ),
+                                  ],
+                                ),
+                              ),
+                              ElevatedButton.icon(
+                                onPressed: () => ScannerPairingDialog.show(context),
+                                icon: const Icon(Icons.qr_code_rounded, size: 16),
+                                label: Text(
+                                  ref.watch(scannerServerProvider).hasPairedDevice
+                                      ? 'Manage Scanner'
+                                      : 'Pair Mobile Scanner',
+                                ),
+                                style: ElevatedButton.styleFrom(
+                                  backgroundColor: ref.watch(scannerServerProvider).hasPairedDevice
+                                      ? AppColors.success
+                                      : AppColors.primary,
+                                  foregroundColor: Colors.white,
+                                  padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+                                ),
+                              ),
+                            ],
+                          ),
+                          const SizedBox(height: 14),
+                          Container(
+                            padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+                            decoration: BoxDecoration(
+                              color: ref.watch(scannerServerProvider).hasPairedDevice
+                                  ? AppColors.successLight.withValues(alpha: 0.3)
+                                  : const Color(0xFFF1F5F9),
+                              borderRadius: BorderRadius.circular(10),
+                              border: Border.all(
+                                color: ref.watch(scannerServerProvider).hasPairedDevice
+                                    ? AppColors.success.withValues(alpha: 0.3)
+                                    : AppColors.border,
+                              ),
+                            ),
+                            child: Row(
+                              children: [
+                                Container(
+                                  width: 8,
+                                  height: 8,
+                                  decoration: BoxDecoration(
+                                    shape: BoxShape.circle,
+                                    color: ref.watch(scannerServerProvider).hasPairedDevice
+                                        ? AppColors.success
+                                        : (ref.watch(scannerServerProvider).isRunning ? Colors.amber : Colors.grey),
+                                  ),
+                                ),
+                                const SizedBox(width: 8),
+                                Expanded(
+                                  child: Text(
+                                    ref.watch(scannerServerProvider).hasPairedDevice
+                                        ? 'Connected: ${ref.watch(scannerServerProvider).pairedDevice!.name} (${ref.watch(scannerServerProvider).pairedDevice!.ipAddress})'
+                                        : (ref.watch(scannerServerProvider).isRunning
+                                            ? 'Server listening on port ${ref.watch(scannerServerProvider).port} • Waiting for phone to connect'
+                                            : 'Scanner server is idle • Click Pair to activate'),
+                                    style: TextStyle(
+                                      fontSize: 12,
+                                      fontWeight: FontWeight.w600,
+                                      color: ref.watch(scannerServerProvider).hasPairedDevice
+                                          ? const Color(0xFF15803D)
+                                          : AppColors.textPrimary,
+                                    ),
+                                  ),
+                                ),
+                                if (ref.watch(scannerServerProvider).hasPairedDevice)
+                                  TextButton(
+                                    onPressed: () => ref.read(scannerServerProvider.notifier).disconnectDevice(),
+                                    child: const Text('Disconnect', style: TextStyle(color: Colors.red, fontSize: 11)),
+                                  ),
+                              ],
+                            ),
                           ),
                         ],
                       ),

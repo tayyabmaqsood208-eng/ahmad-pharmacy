@@ -17,6 +17,7 @@ class Medicine {
   final String? saltComposition;
   final bool requiresPrescription;
   final String productType; // Medicine or Grocery
+  final String? barcode;
 
   Medicine({
     required this.id,
@@ -37,6 +38,7 @@ class Medicine {
     this.saltComposition,
     this.requiresPrescription = false,
     this.productType = 'Medicine',
+    this.barcode,
   });
 
   bool get isLowStock => totalStock <= minStock;
@@ -72,6 +74,7 @@ class Medicine {
       'salt_composition': saltComposition,
       'requires_prescription': requiresPrescription ? 1 : 0,
       'product_type': productType,
+      'barcode': barcode,
     };
   }
 
@@ -95,6 +98,7 @@ class Medicine {
       saltComposition: map['salt_composition'] as String?,
       requiresPrescription: (map['requires_prescription'] as int?) == 1,
       productType: map['product_type'] as String? ?? 'Medicine',
+      barcode: map['barcode'] as String?,
     );
   }
 
@@ -117,6 +121,7 @@ class Medicine {
     String? saltComposition,
     bool? requiresPrescription,
     String? productType,
+    String? barcode,
   }) {
     return Medicine(
       id: id ?? this.id,
@@ -137,6 +142,7 @@ class Medicine {
       saltComposition: saltComposition ?? this.saltComposition,
       requiresPrescription: requiresPrescription ?? this.requiresPrescription,
       productType: productType ?? this.productType,
+      barcode: barcode ?? this.barcode,
     );
   }
 }
