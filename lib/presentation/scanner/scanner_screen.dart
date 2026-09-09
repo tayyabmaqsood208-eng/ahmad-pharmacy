@@ -20,6 +20,7 @@ class _ScannerScreenState extends ConsumerState<ScannerScreen> {
   final TextEditingController _ipController = TextEditingController();
   final TextEditingController _portController = TextEditingController(text: '8089');
   final TextEditingController _tokenController = TextEditingController();
+  final TextEditingController _customQtyController = TextEditingController(text: '10');
 
   MobileScannerController? _scannerController;
   bool _isTorchOn = false;
@@ -55,6 +56,7 @@ class _ScannerScreenState extends ConsumerState<ScannerScreen> {
     _ipController.dispose();
     _portController.dispose();
     _tokenController.dispose();
+    _customQtyController.dispose();
     _scannerController?.dispose();
     super.dispose();
   }
@@ -78,7 +80,7 @@ class _ScannerScreenState extends ConsumerState<ScannerScreen> {
           break;
         }
       } else {
-        // Paired: Process medicine barcode scan
+        // Paired: Process medicine barcode scan in selected mode
         final sent = ref.read(scannerClientProvider.notifier).sendBarcode(rawValue.trim());
         if (sent) {
           HapticFeedback.lightImpact();
@@ -127,6 +129,12 @@ class _ScannerScreenState extends ConsumerState<ScannerScreen> {
     setState(() => _showManualPairing = false);
   }
 
+  void _handleUsbConnect() {
+    final token = _tokenController.text.trim();
+    ref.read(scannerClientProvider.notifier).connectUsb(token: token);
+    setState(() => _showManualPairing = false);
+  }
+
   @override
   Widget build(BuildContext context) {
     final clientState = ref.watch(scannerClientProvider);
@@ -160,7 +168,9 @@ class _ScannerScreenState extends ConsumerState<ScannerScreen> {
                       height: clientState.isConnected ? 160 : 260,
                       decoration: BoxDecoration(
                         border: Border.all(
-                          color: clientState.isConnected ? AppColors.success : AppColors.primary,
+                          color: clientState.isConnected
+                              ? (clientState.selectedMode == ScannerMode.stock ? Colors.amber : AppColors.success)
+                              : AppColors.primary,
                           width: 2.5,
                         ),
                         borderRadius: BorderRadius.circular(16),
@@ -170,7 +180,10 @@ class _ScannerScreenState extends ConsumerState<ScannerScreen> {
                           Center(
                             child: Container(
                               height: 1.5,
-                              color: (clientState.isConnected ? AppColors.success : AppColors.primary).withValues(alpha: 0.7),
+                              color: (clientState.isConnected
+                                      ? (clientState.selectedMode == ScannerMode.stock ? Colors.amber : AppColors.success)
+                                      : AppColors.primary)
+                                  .withValues(alpha: 0.7),
                             ),
                           ),
                           Positioned(
@@ -178,10 +191,14 @@ class _ScannerScreenState extends ConsumerState<ScannerScreen> {
                             left: 0,
                             right: 0,
                             child: Text(
-                              clientState.isConnected ? 'Align barcode in box' : 'Scan POS pairing QR code',
+                              !clientState.isConnected
+                                  ? 'Scan POS pairing QR code'
+                                  : (clientState.selectedMode == ScannerMode.stock
+                                      ? 'Stock Mode: Scan to add +${clientState.stockQuantity} units'
+                                      : 'Sale Mode: Scan to add to bill'),
                               textAlign: TextAlign.center,
                               style: const TextStyle(
-                                color: Colors.white70,
+                                color: Colors.white,
                                 fontSize: 11,
                                 fontWeight: FontWeight.bold,
                                 shadows: [Shadow(color: Colors.black, blurRadius: 4)],
@@ -195,12 +212,23 @@ class _ScannerScreenState extends ConsumerState<ScannerScreen> {
                 ),
               ),
 
-            // 3. Top Floating App Bar (Status & Controls)
+            // 3. Top Floating App Bar & Mode Switcher
             Positioned(
               top: 12,
               left: 14,
               right: 14,
-              child: _buildTopBar(context, clientState),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  _buildTopBar(context, clientState),
+                  const SizedBox(height: 8),
+                  _buildModeSelector(clientState),
+                  if (clientState.selectedMode == ScannerMode.stock && clientState.isConnected) ...[
+                    const SizedBox(height: 8),
+                    _buildStockQuantityBar(clientState),
+                  ],
+                ],
+              ),
             ),
 
             // 4. Bottom Panel: Recent Scans History Feed & Manual Input
@@ -216,11 +244,14 @@ class _ScannerScreenState extends ConsumerState<ScannerScreen> {
     );
   }
 
+  // --- TOP FLOATING APP BAR ---
   Widget _buildTopBar(BuildContext context, ScannerClientState clientState) {
+    final isUsb = clientState.transportType == ScannerTransport.usb;
+
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
       decoration: BoxDecoration(
-        color: Colors.black.withValues(alpha: 0.75),
+        color: Colors.black.withValues(alpha: 0.78),
         borderRadius: BorderRadius.circular(30),
         border: Border.all(color: Colors.white12),
       ),
@@ -233,7 +264,7 @@ class _ScannerScreenState extends ConsumerState<ScannerScreen> {
             decoration: BoxDecoration(
               shape: BoxShape.circle,
               color: clientState.isConnected
-                  ? AppColors.success
+                  ? (isUsb ? Colors.lightBlueAccent : AppColors.success)
                   : (clientState.isConnecting || clientState.isReconnecting ? Colors.amber : Colors.red),
             ),
           ),
@@ -243,23 +274,52 @@ class _ScannerScreenState extends ConsumerState<ScannerScreen> {
               crossAxisAlignment: CrossAxisAlignment.start,
               mainAxisSize: MainAxisSize.min,
               children: [
-                Text(
-                  clientState.isConnected
-                      ? clientState.serverName
-                      : (clientState.isReconnecting
-                          ? 'Reconnecting...'
-                          : (clientState.isConnecting ? 'Connecting...' : 'Not Connected')),
-                  style: const TextStyle(
-                    color: Colors.white,
-                    fontSize: 13,
-                    fontWeight: FontWeight.bold,
-                  ),
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
+                Row(
+                  children: [
+                    Flexible(
+                      child: Text(
+                        clientState.isConnected
+                            ? clientState.serverName
+                            : (clientState.isReconnecting
+                                ? 'Reconnecting...'
+                                : (clientState.isConnecting ? 'Connecting...' : 'Not Connected')),
+                        style: const TextStyle(
+                          color: Colors.white,
+                          fontSize: 13,
+                          fontWeight: FontWeight.bold,
+                        ),
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                    ),
+                    if (clientState.isConnected) ...[
+                      const SizedBox(width: 6),
+                      Container(
+                        padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 1.5),
+                        decoration: BoxDecoration(
+                          color: (isUsb ? Colors.blue : Colors.green).withValues(alpha: 0.25),
+                          borderRadius: BorderRadius.circular(6),
+                          border: Border.all(
+                            color: (isUsb ? Colors.blueAccent : Colors.greenAccent).withValues(alpha: 0.5),
+                          ),
+                        ),
+                        child: Text(
+                          isUsb ? 'USB' : 'Wi-Fi',
+                          style: TextStyle(
+                            color: isUsb ? Colors.lightBlueAccent : Colors.lightGreenAccent,
+                            fontSize: 9,
+                            fontWeight: FontWeight.bold,
+                          ),
+                        ),
+                      ),
+                    ],
+                  ],
                 ),
                 Text(
                   clientState.isConnected
-                      ? 'Ready to scan medicine'
+                      ? (clientState.selectedMode == ScannerMode.stock
+                          ? 'Stock Mode: Receiving inventory'
+                          : 'Sale Mode: Billing active cart')
                       : 'Scan POS QR code to attach',
                   style: const TextStyle(color: Colors.white60, fontSize: 10),
                 ),
@@ -290,7 +350,7 @@ class _ScannerScreenState extends ConsumerState<ScannerScreen> {
           else
             IconButton(
               icon: const Icon(Icons.settings_ethernet_rounded, color: Colors.white70, size: 20),
-              tooltip: 'Manual IP entry',
+              tooltip: 'Manual IP or USB entry',
               onPressed: () => setState(() => _showManualPairing = !_showManualPairing),
             ),
         ],
@@ -298,6 +358,258 @@ class _ScannerScreenState extends ConsumerState<ScannerScreen> {
     );
   }
 
+  // --- DUAL MODE SELECTOR: SALE MODE vs STOCK MODE ---
+  Widget _buildModeSelector(ScannerClientState clientState) {
+    final isSale = clientState.selectedMode == ScannerMode.sale;
+
+    return Container(
+      padding: const EdgeInsets.all(4),
+      decoration: BoxDecoration(
+        color: Colors.black.withValues(alpha: 0.75),
+        borderRadius: BorderRadius.circular(24),
+        border: Border.all(color: Colors.white12),
+      ),
+      child: Row(
+        children: [
+          // Sale Mode Button
+          Expanded(
+            child: InkWell(
+              borderRadius: BorderRadius.circular(20),
+              onTap: () {
+                HapticFeedback.selectionClick();
+                ref.read(scannerClientProvider.notifier).setMode(ScannerMode.sale);
+              },
+              child: AnimatedContainer(
+                duration: const Duration(milliseconds: 180),
+                padding: const EdgeInsets.symmetric(vertical: 8),
+                decoration: BoxDecoration(
+                  color: isSale ? AppColors.primary : Colors.transparent,
+                  borderRadius: BorderRadius.circular(20),
+                  boxShadow: isSale
+                      ? [
+                          BoxShadow(
+                            color: AppColors.primary.withValues(alpha: 0.4),
+                            blurRadius: 8,
+                            offset: const Offset(0, 2),
+                          ),
+                        ]
+                      : null,
+                ),
+                child: Row(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: [
+                    Icon(
+                      Icons.shopping_cart_rounded,
+                      size: 15,
+                      color: isSale ? Colors.white : Colors.white60,
+                    ),
+                    const SizedBox(width: 6),
+                    Text(
+                      'Sale Mode',
+                      style: TextStyle(
+                        color: isSale ? Colors.white : Colors.white70,
+                        fontWeight: isSale ? FontWeight.bold : FontWeight.w500,
+                        fontSize: 12,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          ),
+          const SizedBox(width: 4),
+
+          // Stock Mode Button
+          Expanded(
+            child: InkWell(
+              borderRadius: BorderRadius.circular(20),
+              onTap: () {
+                HapticFeedback.selectionClick();
+                ref.read(scannerClientProvider.notifier).setMode(ScannerMode.stock);
+              },
+              child: AnimatedContainer(
+                duration: const Duration(milliseconds: 180),
+                padding: const EdgeInsets.symmetric(vertical: 8),
+                decoration: BoxDecoration(
+                  color: !isSale ? const Color(0xFFD97706) : Colors.transparent,
+                  borderRadius: BorderRadius.circular(20),
+                  boxShadow: !isSale
+                      ? [
+                          BoxShadow(
+                            color: const Color(0xFFD97706).withValues(alpha: 0.4),
+                            blurRadius: 8,
+                            offset: const Offset(0, 2),
+                          ),
+                        ]
+                      : null,
+                ),
+                child: Row(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: [
+                    Icon(
+                      Icons.inventory_2_rounded,
+                      size: 15,
+                      color: !isSale ? Colors.white : Colors.white60,
+                    ),
+                    const SizedBox(width: 6),
+                    Text(
+                      'Stock Mode',
+                      style: TextStyle(
+                        color: !isSale ? Colors.white : Colors.white70,
+                        fontWeight: !isSale ? FontWeight.bold : FontWeight.w500,
+                        fontSize: 12,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  // --- STOCK MODE BATCH QUANTITY SELECTOR BAR ---
+  Widget _buildStockQuantityBar(ScannerClientState clientState) {
+    final qty = clientState.stockQuantity;
+
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+      decoration: BoxDecoration(
+        color: const Color(0xFF1E293B).withValues(alpha: 0.92),
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: const Color(0xFFF59E0B).withValues(alpha: 0.4)),
+      ),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Row(
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            children: [
+              const Row(
+                children: [
+                  Icon(Icons.add_shopping_cart_rounded, color: Color(0xFFF59E0B), size: 16),
+                  SizedBox(width: 6),
+                  Text(
+                    'Restock Batch Size:',
+                    style: TextStyle(color: Colors.white, fontSize: 11, fontWeight: FontWeight.bold),
+                  ),
+                ],
+              ),
+              // Stepper controls
+              Row(
+                children: [
+                  IconButton(
+                    icon: const Icon(Icons.remove_circle_outline_rounded, color: Colors.white70, size: 20),
+                    padding: EdgeInsets.zero,
+                    constraints: const BoxConstraints(),
+                    onPressed: () {
+                      HapticFeedback.selectionClick();
+                      ref.read(scannerClientProvider.notifier).decrementStockQuantity(1);
+                    },
+                  ),
+                  const SizedBox(width: 8),
+                  InkWell(
+                    onTap: () => _showCustomQuantityDialog(context, qty),
+                    child: Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                      decoration: BoxDecoration(
+                        color: const Color(0xFFD97706),
+                        borderRadius: BorderRadius.circular(8),
+                      ),
+                      child: Text(
+                        '+$qty units',
+                        style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 13),
+                      ),
+                    ),
+                  ),
+                  const SizedBox(width: 8),
+                  IconButton(
+                    icon: const Icon(Icons.add_circle_outline_rounded, color: Colors.white70, size: 20),
+                    padding: EdgeInsets.zero,
+                    constraints: const BoxConstraints(),
+                    onPressed: () {
+                      HapticFeedback.selectionClick();
+                      ref.read(scannerClientProvider.notifier).incrementStockQuantity(1);
+                    },
+                  ),
+                ],
+              ),
+            ],
+          ),
+          const SizedBox(height: 6),
+          // Quick Preset Chips (+1, +5, +10, +25, +50, +100)
+          SingleChildScrollView(
+            scrollDirection: Axis.horizontal,
+            child: Row(
+              children: [1, 5, 10, 25, 50, 100].map((preset) {
+                final isSelected = qty == preset;
+                return Padding(
+                  padding: const EdgeInsets.only(right: 6),
+                  child: InkWell(
+                    borderRadius: BorderRadius.circular(6),
+                    onTap: () {
+                      HapticFeedback.selectionClick();
+                      ref.read(scannerClientProvider.notifier).setStockQuantity(preset);
+                    },
+                    child: Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                      decoration: BoxDecoration(
+                        color: isSelected ? const Color(0xFFF59E0B) : Colors.white12,
+                        borderRadius: BorderRadius.circular(6),
+                      ),
+                      child: Text(
+                        '+$preset',
+                        style: TextStyle(
+                          color: isSelected ? Colors.black : Colors.white70,
+                          fontWeight: FontWeight.bold,
+                          fontSize: 10,
+                        ),
+                      ),
+                    ),
+                  ),
+                );
+              }).toList(),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  void _showCustomQuantityDialog(BuildContext context, int currentQty) {
+    _customQtyController.text = currentQty.toString();
+    showDialog(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Enter Restock Quantity', style: TextStyle(fontSize: 15, fontWeight: FontWeight.bold)),
+        content: TextField(
+          controller: _customQtyController,
+          keyboardType: TextInputType.number,
+          autofocus: true,
+          decoration: const InputDecoration(
+            hintText: 'Quantity to add...',
+            suffixText: 'units',
+          ),
+        ),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('Cancel')),
+          ElevatedButton(
+            onPressed: () {
+              final parsed = int.tryParse(_customQtyController.text.trim()) ?? currentQty;
+              ref.read(scannerClientProvider.notifier).setStockQuantity(parsed);
+              Navigator.pop(ctx);
+            },
+            style: ElevatedButton.styleFrom(backgroundColor: const Color(0xFFD97706), foregroundColor: Colors.white),
+            child: const Text('Set Quantity'),
+          ),
+        ],
+      ),
+    );
+  }
+
+  // --- BOTTOM PANEL: RECENT SCANS LOG & MANUAL ENTRY ---
   Widget _buildBottomPanel(BuildContext context, ScannerClientState clientState, bool isDark) {
     return Container(
       decoration: BoxDecoration(
@@ -357,7 +669,7 @@ class _ScannerScreenState extends ConsumerState<ScannerScreen> {
             const SizedBox(height: 8),
           ],
 
-          // Manual Pair Form (Toggleable)
+          // Manual Pair Form (Toggleable: Wi-Fi IP or USB Loopback)
           if (_showManualPairing && !clientState.isConnected) ...[
             Container(
               padding: const EdgeInsets.all(12),
@@ -368,8 +680,21 @@ class _ScannerScreenState extends ConsumerState<ScannerScreen> {
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  const Text('Manual Terminal Pairing', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 12)),
+                  Row(
+                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                    children: [
+                      const Text('Pair to POS Terminal', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 12)),
+                      IconButton(
+                        icon: const Icon(Icons.close, size: 14),
+                        padding: EdgeInsets.zero,
+                        constraints: const BoxConstraints(),
+                        onPressed: () => setState(() => _showManualPairing = false),
+                      ),
+                    ],
+                  ),
                   const SizedBox(height: 8),
+
+                  // Option 1: Wi-Fi LAN IP input
                   Row(
                     children: [
                       Expanded(
@@ -377,7 +702,7 @@ class _ScannerScreenState extends ConsumerState<ScannerScreen> {
                         child: TextField(
                           controller: _ipController,
                           decoration: const InputDecoration(
-                            hintText: 'POS IP (e.g. 192.168.1.5)',
+                            hintText: 'Terminal IP (192.168.x.x)',
                             isDense: true,
                             contentPadding: EdgeInsets.symmetric(horizontal: 10, vertical: 8),
                           ),
@@ -405,9 +730,50 @@ class _ScannerScreenState extends ConsumerState<ScannerScreen> {
                           foregroundColor: Colors.white,
                           padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
                         ),
-                        child: const Text('Pair', style: TextStyle(fontSize: 12)),
+                        child: const Text('Connect', style: TextStyle(fontSize: 12)),
                       ),
                     ],
+                  ),
+                  const SizedBox(height: 8),
+
+                  // Option 2: Direct USB Cable (ADB Reverse)
+                  Container(
+                    padding: const EdgeInsets.all(8),
+                    decoration: BoxDecoration(
+                      color: Colors.blue.withValues(alpha: 0.1),
+                      borderRadius: BorderRadius.circular(8),
+                      border: Border.all(color: Colors.blue.withValues(alpha: 0.3)),
+                    ),
+                    child: Row(
+                      children: [
+                        const Icon(Icons.usb_rounded, color: Colors.blue, size: 20),
+                        const SizedBox(width: 8),
+                        const Expanded(
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Text(
+                                'USB Cable Direct Mode (No Wi-Fi needed)',
+                                style: TextStyle(fontWeight: FontWeight.bold, fontSize: 11, color: Colors.blue),
+                              ),
+                              Text(
+                                'Plug cable & run: adb reverse tcp:8089 tcp:8089 on PC',
+                                style: TextStyle(fontSize: 10, color: AppColors.textSecondary),
+                              ),
+                            ],
+                          ),
+                        ),
+                        ElevatedButton(
+                          onPressed: _handleUsbConnect,
+                          style: ElevatedButton.styleFrom(
+                            backgroundColor: Colors.blue,
+                            foregroundColor: Colors.white,
+                            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                          ),
+                          child: const Text('USB Connect', style: TextStyle(fontSize: 11)),
+                        ),
+                      ],
+                    ),
                   ),
                 ],
               ),
@@ -421,7 +787,7 @@ class _ScannerScreenState extends ConsumerState<ScannerScreen> {
               mainAxisAlignment: MainAxisAlignment.spaceBetween,
               children: [
                 const Text(
-                  'Recent Scans',
+                  'Recent Scans Feed',
                   style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold),
                 ),
                 Text(
@@ -432,19 +798,43 @@ class _ScannerScreenState extends ConsumerState<ScannerScreen> {
             ),
             const SizedBox(height: 6),
             ConstrainedBox(
-              constraints: const BoxConstraints(maxHeight: 140),
+              constraints: const BoxConstraints(maxHeight: 150),
               child: ListView.separated(
                 shrinkWrap: true,
                 itemCount: clientState.recentLogs.length,
                 separatorBuilder: (_, _) => const Divider(height: 6),
                 itemBuilder: (context, index) {
                   final item = clientState.recentLogs[index];
+                  final isStock = item.mode == 'stock';
+
                   return Row(
                     children: [
                       Icon(
                         item.isSuccess ? Icons.check_circle_rounded : Icons.help_outline_rounded,
                         size: 16,
-                        color: item.isSuccess ? AppColors.success : Colors.amber,
+                        color: item.isSuccess
+                            ? (isStock ? const Color(0xFFD97706) : AppColors.success)
+                            : Colors.amber,
+                      ),
+                      const SizedBox(width: 8),
+                      // Mode badge
+                      Container(
+                        padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 1.5),
+                        decoration: BoxDecoration(
+                          color: isStock ? const Color(0xFFFEF3C7) : AppColors.primaryLight,
+                          borderRadius: BorderRadius.circular(4),
+                          border: Border.all(
+                            color: isStock ? const Color(0xFFF59E0B) : AppColors.primary.withValues(alpha: 0.3),
+                          ),
+                        ),
+                        child: Text(
+                          isStock ? 'STOCK' : 'SALE',
+                          style: TextStyle(
+                            fontSize: 9,
+                            fontWeight: FontWeight.bold,
+                            color: isStock ? const Color(0xFFD97706) : AppColors.primary,
+                          ),
+                        ),
                       ),
                       const SizedBox(width: 8),
                       Expanded(
@@ -458,13 +848,18 @@ class _ScannerScreenState extends ConsumerState<ScannerScreen> {
                               overflow: TextOverflow.ellipsis,
                             ),
                             Text(
-                              'Code: ${item.barcode}',
+                              'Code: ${item.barcode}${isStock ? " • Qty: +${item.quantity}" : ""}',
                               style: const TextStyle(fontSize: 10, color: AppColors.textSecondary),
                             ),
                           ],
                         ),
                       ),
-                      if (item.price != null)
+                      if (isStock && item.newStock != null)
+                        Text(
+                          'Total: ${item.newStock}',
+                          style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 12, color: Color(0xFFD97706)),
+                        )
+                      else if (!isStock && item.price != null)
                         Text(
                           'Rs ${item.price!.toStringAsFixed(1)}',
                           style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 12, color: AppColors.primary),
@@ -479,7 +874,11 @@ class _ScannerScreenState extends ConsumerState<ScannerScreen> {
             Padding(
               padding: const EdgeInsets.symmetric(vertical: 6),
               child: Text(
-                clientState.isConnected ? 'No scans yet. Point camera at medicine barcode.' : 'Scan POS screen QR code to connect.',
+                clientState.isConnected
+                    ? (clientState.selectedMode == ScannerMode.stock
+                        ? 'Stock Mode active. Scan medicine barcode to restock +${clientState.stockQuantity} units.'
+                        : 'Sale Mode active. Scan medicine barcode to add to bill.')
+                    : 'Scan POS screen QR code to connect.',
                 style: const TextStyle(fontSize: 11, color: AppColors.textSecondary),
               ),
             ),
@@ -494,7 +893,9 @@ class _ScannerScreenState extends ConsumerState<ScannerScreen> {
                     controller: _manualBarcodeController,
                     autofocus: true,
                     decoration: InputDecoration(
-                      hintText: 'Enter barcode number manually...',
+                      hintText: clientState.selectedMode == ScannerMode.stock
+                          ? 'Enter barcode to restock (+${clientState.stockQuantity})...'
+                          : 'Enter barcode to add to bill...',
                       isDense: true,
                       prefixIcon: const Icon(Icons.keyboard_alt_outlined, size: 16),
                       suffixIcon: IconButton(
@@ -525,12 +926,14 @@ class _ScannerScreenState extends ConsumerState<ScannerScreen> {
 
   /// Fallback display when run on Desktop (Windows) where camera hardware is not active
   Widget _buildDesktopConsole(bool isDark, ScannerClientState clientState) {
+    final isStock = clientState.selectedMode == ScannerMode.stock;
+
     return Container(
       color: isDark ? const Color(0xFF0F172A) : const Color(0xFFF8FAFC),
       padding: const EdgeInsets.all(24),
       child: Center(
         child: Container(
-          constraints: const BoxConstraints(maxWidth: 440),
+          constraints: const BoxConstraints(maxWidth: 460),
           padding: const EdgeInsets.all(24),
           decoration: BoxDecoration(
             color: isDark ? AppColors.cardDarkBg : Colors.white,
@@ -540,30 +943,64 @@ class _ScannerScreenState extends ConsumerState<ScannerScreen> {
           child: Column(
             mainAxisSize: MainAxisSize.min,
             children: [
-              const Icon(
-                Icons.stay_current_portrait_rounded,
-                color: AppColors.primary,
-                size: 56,
+              Icon(
+                isStock ? Icons.inventory_2_rounded : Icons.stay_current_portrait_rounded,
+                color: isStock ? const Color(0xFFD97706) : AppColors.primary,
+                size: 50,
+              ),
+              const SizedBox(height: 12),
+              Text(
+                isStock ? 'Mobile Scanner (Stock Restock Mode)' : 'Mobile Scanner (POS Sale Mode)',
+                style: const TextStyle(fontSize: 17, fontWeight: FontWeight.bold),
+              ),
+              const SizedBox(height: 4),
+              Text(
+                isStock
+                    ? 'Simulate stock receiving scan: adds quantity directly to inventory DB.'
+                    : 'Simulate sale scan: resolves medicine and adds to active billing cart.',
+                textAlign: TextAlign.center,
+                style: const TextStyle(fontSize: 12, color: AppColors.textSecondary),
+              ),
+              const SizedBox(height: 16),
+
+              // Mode Switcher buttons in Desktop test console
+              Row(
+                children: [
+                  Expanded(
+                    child: OutlinedButton.icon(
+                      onPressed: () => ref.read(scannerClientProvider.notifier).setMode(ScannerMode.sale),
+                      icon: const Icon(Icons.shopping_cart_rounded, size: 14),
+                      label: const Text('Sale Mode', style: TextStyle(fontSize: 12)),
+                      style: OutlinedButton.styleFrom(
+                        backgroundColor: !isStock ? AppColors.primaryLight : null,
+                        foregroundColor: !isStock ? AppColors.primary : AppColors.textSecondary,
+                        side: BorderSide(color: !isStock ? AppColors.primary : AppColors.border),
+                      ),
+                    ),
+                  ),
+                  const SizedBox(width: 10),
+                  Expanded(
+                    child: OutlinedButton.icon(
+                      onPressed: () => ref.read(scannerClientProvider.notifier).setMode(ScannerMode.stock),
+                      icon: const Icon(Icons.inventory_2_rounded, size: 14),
+                      label: const Text('Stock Mode', style: TextStyle(fontSize: 12)),
+                      style: OutlinedButton.styleFrom(
+                        backgroundColor: isStock ? const Color(0xFFFEF3C7) : null,
+                        foregroundColor: isStock ? const Color(0xFFD97706) : AppColors.textSecondary,
+                        side: BorderSide(color: isStock ? const Color(0xFFD97706) : AppColors.border),
+                      ),
+                    ),
+                  ),
+                ],
               ),
               const SizedBox(height: 14),
-              const Text(
-                'Mobile Scanner Mode',
-                style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
-              ),
-              const SizedBox(height: 6),
-              const Text(
-                'Camera scanning runs on Android & iOS mobile devices.\nOn desktop, you can test by typing or pasting barcodes below.',
-                textAlign: TextAlign.center,
-                style: TextStyle(fontSize: 12, color: AppColors.textSecondary),
-              ),
-              const SizedBox(height: 20),
 
               // Test barcode input
               TextField(
                 controller: _manualBarcodeController,
-                decoration: const InputDecoration(
-                  hintText: 'Enter test barcode or SKU...',
-                  prefixIcon: Icon(Icons.barcode_reader, size: 20),
+                decoration: InputDecoration(
+                  hintText: isStock ? 'Enter barcode to restock (+${clientState.stockQuantity})...' : 'Enter test barcode or SKU...',
+                  prefixIcon: const Icon(Icons.barcode_reader, size: 20),
                 ),
                 onSubmitted: (_) => _handleManualBarcodeSubmit(),
               ),
@@ -573,9 +1010,13 @@ class _ScannerScreenState extends ConsumerState<ScannerScreen> {
                 child: ElevatedButton.icon(
                   onPressed: _handleManualBarcodeSubmit,
                   icon: const Icon(Icons.send_rounded, size: 16),
-                  label: const Text('Simulate Scan Event'),
+                  label: Text(
+                    isStock
+                        ? 'Simulate Restock Scan (+${clientState.stockQuantity} Units)'
+                        : 'Simulate Sale Cart Scan',
+                  ),
                   style: ElevatedButton.styleFrom(
-                    backgroundColor: AppColors.primary,
+                    backgroundColor: isStock ? const Color(0xFFD97706) : AppColors.primary,
                     foregroundColor: Colors.white,
                     padding: const EdgeInsets.symmetric(vertical: 12),
                   ),

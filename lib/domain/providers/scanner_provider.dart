@@ -1,15 +1,30 @@
 import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:uuid/uuid.dart';
 import '../../core/network/scanner_network_service.dart';
 import '../../data/models/paired_device.dart';
 import '../../data/models/batch.dart';
+import '../../data/models/stock_adjustment.dart';
 import '../../data/repositories/inventory_repository.dart';
 import '../../data/repositories/medicine_repository.dart';
 import 'pos_cart_provider.dart';
+import 'medicine_provider.dart';
+import 'inventory_provider.dart';
+import 'report_provider.dart';
 
 // Repositories
 final medicineRepoProvider = Provider((ref) => MedicineRepository());
 final inventoryRepoProvider = Provider((ref) => InventoryRepository());
+
+enum ScannerMode {
+  sale,
+  stock,
+}
+
+enum ScannerTransport {
+  wifi,
+  usb,
+}
 
 // ==========================================
 // 1. POS TERMINAL WEBSOCKET SERVER PROVIDER
@@ -23,6 +38,9 @@ class ScannerServerState {
   final String pairingToken;
   final PairedDevice? pairedDevice;
   final String? lastUnknownBarcode;
+  final String lastUnknownBarcodeMode;
+  final int lastUnknownBarcodeQty;
+  final String? lastStockRestockedMessage;
 
   ScannerServerState({
     this.isRunning = false,
@@ -32,6 +50,9 @@ class ScannerServerState {
     this.pairingToken = '',
     this.pairedDevice,
     this.lastUnknownBarcode,
+    this.lastUnknownBarcodeMode = 'sale',
+    this.lastUnknownBarcodeQty = 1,
+    this.lastStockRestockedMessage,
   });
 
   bool get hasPairedDevice => pairedDevice != null && pairedDevice!.isConnected;
@@ -57,6 +78,10 @@ class ScannerServerState {
     bool clearPairedDevice = false,
     String? lastUnknownBarcode,
     bool clearUnknownBarcode = false,
+    String? lastUnknownBarcodeMode,
+    int? lastUnknownBarcodeQty,
+    String? lastStockRestockedMessage,
+    bool clearStockRestockedMessage = false,
   }) {
     return ScannerServerState(
       isRunning: isRunning ?? this.isRunning,
@@ -66,6 +91,11 @@ class ScannerServerState {
       pairingToken: pairingToken ?? this.pairingToken,
       pairedDevice: clearPairedDevice ? null : (pairedDevice ?? this.pairedDevice),
       lastUnknownBarcode: clearUnknownBarcode ? null : (lastUnknownBarcode ?? this.lastUnknownBarcode),
+      lastUnknownBarcodeMode: lastUnknownBarcodeMode ?? this.lastUnknownBarcodeMode,
+      lastUnknownBarcodeQty: lastUnknownBarcodeQty ?? this.lastUnknownBarcodeQty,
+      lastStockRestockedMessage: clearStockRestockedMessage
+          ? null
+          : (lastStockRestockedMessage ?? this.lastStockRestockedMessage),
     );
   }
 }
@@ -88,8 +118,8 @@ class ScannerServerNotifier extends StateNotifier<ScannerServerState> {
       }
     };
 
-    _server.onScanReceived = (barcode, sendAck) async {
-      await _handleIncomingScan(barcode, sendAck);
+    _server.onScanReceived = (barcode, mode, quantity, sendAck) async {
+      await _handleIncomingScan(barcode, mode, quantity, sendAck);
     };
   }
 
@@ -134,8 +164,19 @@ class ScannerServerNotifier extends StateNotifier<ScannerServerState> {
     state = state.copyWith(clearUnknownBarcode: true);
   }
 
-  /// Incoming scan processor: resolves barcode -> FEFO batch -> active POS cart
-  Future<void> _handleIncomingScan(String barcode, Function(Map<String, dynamic>) sendAck) async {
+  void clearStockRestockedMessage() {
+    state = state.copyWith(clearStockRestockedMessage: true);
+  }
+
+  /// Incoming scan processor:
+  /// - Sale Mode: resolves barcode -> FEFO batch -> adds to active POS cart
+  /// - Stock Mode: increments medicine totalStock in DB and writes StockAdjustment audit log without touching cart
+  Future<void> _handleIncomingScan(
+    String barcode,
+    String mode,
+    int quantity,
+    Function(Map<String, dynamic>) sendAck,
+  ) async {
     final medRepo = _ref.read(medicineRepoProvider);
     final invRepo = _ref.read(inventoryRepoProvider);
     final cartNotifier = _ref.read(posCartProvider.notifier);
@@ -145,13 +186,19 @@ class ScannerServerNotifier extends StateNotifier<ScannerServerState> {
 
     if (medicine == null) {
       // Unrecognized barcode
-      debugPrint('[ScannerServer] Unknown barcode scanned: $barcode');
+      debugPrint('[ScannerServer] Unknown barcode ($mode, qty: $quantity) scanned: $barcode');
       if (mounted) {
-        state = state.copyWith(lastUnknownBarcode: barcode);
+        state = state.copyWith(
+          lastUnknownBarcode: barcode,
+          lastUnknownBarcodeMode: mode,
+          lastUnknownBarcodeQty: quantity,
+        );
       }
       sendAck({
         'status': 'unknown',
         'message': 'Unrecognized Barcode',
+        'mode': mode,
+        'quantity': quantity,
       });
       return;
     }
@@ -172,31 +219,107 @@ class ScannerServerNotifier extends StateNotifier<ScannerServerState> {
         } else if (selectedBatch.isExpiringSoon) {
           warning = 'Warning: Medicine expiring soon';
         }
-      } else {
+      } else if (mode == 'sale') {
         warning = 'Warning: No batch stock recorded';
       }
     } catch (e) {
       debugPrint('[ScannerServer] Error resolving batch: $e');
     }
 
-    // 3. Add to POS cart (defaults to single tablet if medicine is a pack/tablet)
+    // 3. Process according to selected scanner mode
+    if (mode == 'stock') {
+      // --- STOCK MODE: Directly update inventory count and write audit log ---
+      final newTotalStock = medicine.totalStock + quantity;
+
+      if (selectedBatch != null) {
+        final adjustment = StockAdjustment(
+          id: const Uuid().v4(),
+          medicineId: medicine.id,
+          medicineName: medicine.name,
+          batchId: selectedBatch.id,
+          batchNumber: selectedBatch.batchNumber,
+          quantityChange: quantity,
+          adjustmentType: 'Add',
+          reason: 'Restock (Mobile Scanner)',
+          createdAt: DateTime.now(),
+          notes: 'Restocked via mobile scanner ($quantity units added)',
+        );
+        await invRepo.addStockAdjustment(adjustment, updateBatchQuantity: true);
+      } else {
+        // Create initial batch so SUM(batches.quantity) works
+        final newBatch = Batch(
+          id: const Uuid().v4(),
+          medicineId: medicine.id,
+          batchNumber: 'RESTOCK-${DateTime.now().millisecondsSinceEpoch.toString().substring(7)}',
+          expiryDate: DateTime.now().add(const Duration(days: 365)),
+          quantity: quantity,
+          buyPrice: medicine.defaultCostPrice,
+          sellPrice: medicine.defaultPrice,
+          receivedDate: DateTime.now(),
+        );
+        await invRepo.addBatch(newBatch);
+
+        final adjustment = StockAdjustment(
+          id: const Uuid().v4(),
+          medicineId: medicine.id,
+          medicineName: medicine.name,
+          batchId: newBatch.id,
+          batchNumber: newBatch.batchNumber,
+          quantityChange: quantity,
+          adjustmentType: 'Add',
+          reason: 'Restock (Mobile Scanner)',
+          createdAt: DateTime.now(),
+          notes: 'Restocked via mobile scanner ($quantity units added)',
+        );
+        await invRepo.addStockAdjustment(adjustment, updateBatchQuantity: false);
+      }
+
+      await medRepo.updateMedicine(medicine.copyWith(totalStock: newTotalStock));
+
+      // Invalidate providers to update POS and inventory tables in real-time
+      _ref.invalidate(medicinesListProvider);
+      _ref.invalidate(allBatchesProvider);
+      _ref.invalidate(dashboardStatsProvider);
+      _ref.invalidate(stockAdjustmentsProvider);
+
+      final notifyMsg = '📦 Restocked: ${medicine.name} (+$quantity units, Total: $newTotalStock)';
+      debugPrint('[ScannerServer] $notifyMsg');
+
+      if (mounted) {
+        state = state.copyWith(lastStockRestockedMessage: notifyMsg);
+      }
+
+      sendAck({
+        'status': 'success',
+        'medicineName': medicine.name,
+        'newStock': newTotalStock,
+        'mode': 'stock',
+        'quantity': quantity,
+        'warning': warning,
+      });
+      return;
+    }
+
+    // --- SALE MODE: Add to active POS billing cart ---
     final isFullBox = !medicine.isTabletOrPack;
     cartNotifier.addItem(
       medicine,
       selectedBatch: selectedBatch,
       isFullBox: isFullBox,
-      quantity: 1,
+      quantity: quantity,
     );
 
     final packSize = medicine.effectivePackSize;
     final basePrice = selectedBatch?.sellPrice ?? medicine.defaultPrice;
     final unitPrice = isFullBox ? basePrice : (basePrice / packSize);
 
-    // 4. Send acknowledgment back to mobile phone for on-screen log
+    // Send acknowledgment back to mobile phone
     sendAck({
       'status': 'success',
       'medicineName': '${medicine.name} (${isFullBox ? "Box" : "Tablet"})',
       'price': unitPrice,
+      'mode': 'sale',
+      'quantity': quantity,
       'warning': warning,
     });
   }
@@ -223,6 +346,9 @@ class ScannerClientState {
   final String serverName;
   final List<ScanLogItem> recentLogs;
   final String? errorMessage;
+  final ScannerMode selectedMode;
+  final int stockQuantity;
+  final ScannerTransport transportType;
 
   ScannerClientState({
     this.isConnected = false,
@@ -231,6 +357,9 @@ class ScannerClientState {
     this.serverName = '',
     this.recentLogs = const [],
     this.errorMessage,
+    this.selectedMode = ScannerMode.sale,
+    this.stockQuantity = 1,
+    this.transportType = ScannerTransport.wifi,
   });
 
   ScannerClientState copyWith({
@@ -241,6 +370,9 @@ class ScannerClientState {
     List<ScanLogItem>? recentLogs,
     String? errorMessage,
     bool clearError = false,
+    ScannerMode? selectedMode,
+    int? stockQuantity,
+    ScannerTransport? transportType,
   }) {
     return ScannerClientState(
       isConnected: isConnected ?? this.isConnected,
@@ -249,6 +381,9 @@ class ScannerClientState {
       serverName: serverName ?? this.serverName,
       recentLogs: recentLogs ?? this.recentLogs,
       errorMessage: clearError ? null : (errorMessage ?? this.errorMessage),
+      selectedMode: selectedMode ?? this.selectedMode,
+      stockQuantity: stockQuantity ?? this.stockQuantity,
+      transportType: transportType ?? this.transportType,
     );
   }
 }
@@ -289,13 +424,45 @@ class ScannerClientNotifier extends StateNotifier<ScannerClientState> {
     };
   }
 
+  void setMode(ScannerMode mode) {
+    state = state.copyWith(selectedMode: mode);
+  }
+
+  void setStockQuantity(int qty) {
+    state = state.copyWith(stockQuantity: qty.clamp(1, 9999));
+  }
+
+  void incrementStockQuantity([int amount = 1]) {
+    state = state.copyWith(stockQuantity: (state.stockQuantity + amount).clamp(1, 9999));
+  }
+
+  void decrementStockQuantity([int amount = 1]) {
+    state = state.copyWith(stockQuantity: (state.stockQuantity - amount).clamp(1, 9999));
+  }
+
+  void setTransport(ScannerTransport transport) {
+    state = state.copyWith(transportType: transport);
+  }
+
   /// Connect using scanned QR payload
   Future<bool> connectWithPayload(ScannerPairingPayload payload) async {
+    state = state.copyWith(transportType: ScannerTransport.wifi);
     return connect(
       ip: payload.ip,
       port: payload.port,
       token: payload.token,
       deviceName: 'Mobile Scanner (${payload.name})',
+    );
+  }
+
+  /// One-tap connect for USB Direct Mode (via ADB reverse tcp:8089 tcp:8089)
+  Future<bool> connectUsb({String token = ''}) async {
+    state = state.copyWith(transportType: ScannerTransport.usb);
+    return connect(
+      ip: '127.0.0.1',
+      port: 8089,
+      token: token,
+      deviceName: 'Mobile Scanner (USB Cable)',
     );
   }
 
@@ -316,9 +483,11 @@ class ScannerClientNotifier extends StateNotifier<ScannerClientState> {
     return success;
   }
 
-  /// Send barcode scan to POS terminal
-  bool sendBarcode(String barcode) {
-    return _client.sendScan(barcode);
+  /// Send barcode scan to POS terminal with mode and quantity
+  bool sendBarcode(String barcode, {int? customQuantity}) {
+    final modeStr = state.selectedMode == ScannerMode.stock ? 'stock' : 'sale';
+    final qty = customQuantity ?? (state.selectedMode == ScannerMode.stock ? state.stockQuantity : 1);
+    return _client.sendScan(barcode, mode: modeStr, quantity: qty);
   }
 
   void disconnect() {

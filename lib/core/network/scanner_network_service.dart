@@ -65,7 +65,12 @@ class ScannerServer {
 
   // Callbacks
   Function(PairedDevice? device)? onDeviceChanged;
-  Function(String barcode, Function(Map<String, dynamic> response) sendAck)? onScanReceived;
+  Function(
+    String barcode,
+    String mode,
+    int quantity,
+    Function(Map<String, dynamic> response) sendAck,
+  )? onScanReceived;
 
   bool get isRunning => _server != null;
   PairedDevice? get pairedDevice => _pairedDevice;
@@ -233,17 +238,21 @@ class ScannerServer {
           }
 
           final barcode = message['barcode'] as String? ?? '';
+          final mode = (message['mode'] as String?)?.toLowerCase() == 'stock' ? 'stock' : 'sale';
+          final quantity = (message['quantity'] as num?)?.toInt() ?? 1;
           if (barcode.trim().isEmpty) return;
 
           _pairedDevice = _pairedDevice?.copyWith(lastPingAt: DateTime.now());
 
-          // Dispatch scan to POS cart pipeline
+          // Dispatch scan to POS terminal pipeline
           if (onScanReceived != null) {
-            onScanReceived!(barcode.trim(), (ackData) {
+            onScanReceived!(barcode.trim(), mode, quantity, (ackData) {
               try {
                 socket.add(jsonEncode({
                   'type': 'scan_ack',
                   'barcode': barcode.trim(),
+                  'mode': mode,
+                  'quantity': quantity,
                   ...ackData,
                 }));
               } catch (_) {}
@@ -306,7 +315,10 @@ class ScannerServer {
 class ScanLogItem {
   final String barcode;
   final String title;
+  final String mode; // 'sale' or 'stock'
+  final int quantity;
   final double? price;
+  final int? newStock;
   final bool isSuccess;
   final String? warning;
   final DateTime timestamp;
@@ -314,7 +326,10 @@ class ScanLogItem {
   ScanLogItem({
     required this.barcode,
     required this.title,
+    this.mode = 'sale',
+    this.quantity = 1,
     this.price,
+    this.newStock,
     required this.isSuccess,
     this.warning,
     required this.timestamp,
@@ -420,14 +435,20 @@ class ScannerClient {
         case 'scan_ack':
           final barcode = message['barcode'] as String? ?? '';
           final status = message['status'] as String? ?? '';
-          final medName = message['medicineName'] as String? ?? (status == 'success' ? 'Medicine Added' : 'Unrecognized Barcode');
+          final mode = message['mode'] as String? ?? 'sale';
+          final quantity = (message['quantity'] as num?)?.toInt() ?? 1;
+          final medName = message['medicineName'] as String? ?? (status == 'success' ? 'Medicine Processed' : 'Unrecognized Barcode');
           final price = (message['price'] as num?)?.toDouble();
+          final newStock = (message['newStock'] as num?)?.toInt();
           final warning = message['warning'] as String?;
 
           final logItem = ScanLogItem(
             barcode: barcode,
             title: medName,
+            mode: mode,
+            quantity: quantity,
             price: price,
+            newStock: newStock,
             isSuccess: status == 'success',
             warning: warning,
             timestamp: DateTime.now(),
@@ -458,8 +479,8 @@ class ScannerClient {
     }
   }
 
-  /// Send barcode scan event with debounce check
-  bool sendScan(String barcode) {
+  /// Send barcode scan event with mode and quantity, with debounce check
+  bool sendScan(String barcode, {String mode = 'sale', int quantity = 1}) {
     if (!_isConnected || _socket == null) return false;
 
     final code = barcode.trim();
@@ -478,6 +499,8 @@ class ScannerClient {
       _socket!.add(jsonEncode({
         'type': 'scan',
         'barcode': code,
+        'mode': mode,
+        'quantity': quantity,
         'timestamp': now,
       }));
       return true;

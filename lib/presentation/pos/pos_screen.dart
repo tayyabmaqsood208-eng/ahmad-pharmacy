@@ -13,9 +13,11 @@ import '../../core/widgets/skeleton_loader.dart';
 import '../../core/widgets/empty_state_widget.dart';
 import 'customer_select_dialog.dart';
 import 'receipt_modal.dart';
-import '../../domain/providers/scanner_provider.dart';
 import 'widgets/scanner_pairing_dialog.dart';
+import '../../domain/providers/scanner_provider.dart';
 import 'package:uuid/uuid.dart';
+import '../../data/models/stock_adjustment.dart';
+import '../../domain/providers/report_provider.dart';
 
 class PosScreen extends ConsumerStatefulWidget {
   const PosScreen({super.key});
@@ -50,12 +52,20 @@ class _PosScreenState extends ConsumerState<PosScreen> {
     final settingsVal = ref.watch(settingsProvider).value;
     final currency = settingsVal?.currencySymbol ?? 'Rs';
 
-    // Listen for incoming unrecognized barcodes from mobile scanner
+    // Listen for incoming unrecognized barcodes and restock events from mobile scanner
     ref.listen<ScannerServerState>(scannerServerProvider, (previous, next) {
       if (next.lastUnknownBarcode != null &&
           next.lastUnknownBarcode != previous?.lastUnknownBarcode) {
         final unknownCode = next.lastUnknownBarcode!;
-        _showUnknownBarcodeDialog(context, ref, unknownCode);
+        final mode = next.lastUnknownBarcodeMode;
+        final qty = next.lastUnknownBarcodeQty;
+        _showUnknownBarcodeDialog(context, ref, unknownCode, mode: mode, quantity: qty);
+      }
+
+      if (next.lastStockRestockedMessage != null &&
+          next.lastStockRestockedMessage != previous?.lastStockRestockedMessage) {
+        ToastHelper.showSuccess(context, next.lastStockRestockedMessage!);
+        ref.read(scannerServerProvider.notifier).clearStockRestockedMessage();
       }
     });
 
@@ -1616,8 +1626,11 @@ class _PosScreenState extends ConsumerState<PosScreen> {
   void _showUnknownBarcodeDialog(
     BuildContext context,
     WidgetRef ref,
-    String barcode,
-  ) {
+    String barcode, {
+    String mode = 'sale',
+    int quantity = 1,
+  }) {
+    final isStock = mode == 'stock';
     showDialog(
       context: context,
       barrierDismissible: false,
@@ -1628,16 +1641,20 @@ class _PosScreenState extends ConsumerState<PosScreen> {
             Container(
               padding: const EdgeInsets.all(8),
               decoration: BoxDecoration(
-                color: Colors.amber.withValues(alpha: 0.15),
+                color: (isStock ? const Color(0xFFD97706) : Colors.amber).withValues(alpha: 0.15),
                 borderRadius: BorderRadius.circular(8),
               ),
-              child: const Icon(Icons.qr_code_scanner_rounded, color: Colors.amber, size: 24),
+              child: Icon(
+                isStock ? Icons.inventory_2_rounded : Icons.qr_code_scanner_rounded,
+                color: isStock ? const Color(0xFFD97706) : Colors.amber,
+                size: 24,
+              ),
             ),
             const SizedBox(width: 12),
-            const Expanded(
+            Expanded(
               child: Text(
-                'Unrecognized Barcode',
-                style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16),
+                isStock ? 'Unrecognized Barcode (Stock Mode)' : 'Unrecognized Barcode (Sale Mode)',
+                style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16),
               ),
             ),
           ],
@@ -1647,7 +1664,9 @@ class _PosScreenState extends ConsumerState<PosScreen> {
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             Text(
-              'A mobile scanner sent barcode "$barcode", but no matching item was found in your offline medicine database.',
+              isStock
+                  ? 'A mobile scanner sent barcode "$barcode" in Stock Restock Mode (+$quantity units), but no matching item was found in your offline medicine catalog.'
+                  : 'A mobile scanner sent barcode "$barcode" in Sale Mode, but no matching item was found in your offline medicine database.',
               style: const TextStyle(fontSize: 13),
             ),
             const SizedBox(height: 14),
@@ -1687,12 +1706,12 @@ class _PosScreenState extends ConsumerState<PosScreen> {
             onPressed: () {
               ref.read(scannerServerProvider.notifier).clearUnknownBarcode();
               Navigator.of(ctx).pop();
-              _showQuickAddMedicineDialog(context, ref, barcode);
+              _showQuickAddMedicineDialog(context, ref, barcode, mode: mode, quantity: quantity);
             },
             icon: const Icon(Icons.add_rounded, size: 16),
-            label: const Text('Create Medicine Record'),
+            label: Text(isStock ? 'Create & Restock (+$quantity)' : 'Create Medicine Record'),
             style: ElevatedButton.styleFrom(
-              backgroundColor: AppColors.primary,
+              backgroundColor: isStock ? const Color(0xFFD97706) : AppColors.primary,
               foregroundColor: Colors.white,
             ),
           ),
@@ -1704,8 +1723,11 @@ class _PosScreenState extends ConsumerState<PosScreen> {
   void _showQuickAddMedicineDialog(
     BuildContext context,
     WidgetRef ref,
-    String barcode,
-  ) {
+    String barcode, {
+    String mode = 'sale',
+    int quantity = 1,
+  }) {
+    final isStock = mode == 'stock';
     final nameCtrl = TextEditingController();
     final genericCtrl = TextEditingController();
     final categoryCtrl = TextEditingController(text: 'General');
@@ -1714,12 +1736,16 @@ class _PosScreenState extends ConsumerState<PosScreen> {
     final priceCtrl = TextEditingController(text: '50.0');
     final costCtrl = TextEditingController(text: '35.0');
     final packSizeCtrl = TextEditingController(text: '10');
+    final stockCtrl = TextEditingController(text: isStock ? quantity.toString() : '50');
 
     showDialog(
       context: context,
       builder: (ctx) => AlertDialog(
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-        title: const Text('Register Scanned Medicine', style: TextStyle(fontWeight: FontWeight.bold)),
+        title: Text(
+          isStock ? 'Register & Restock Medicine' : 'Register Scanned Medicine',
+          style: const TextStyle(fontWeight: FontWeight.bold),
+        ),
         content: SizedBox(
           width: 440,
           child: SingleChildScrollView(
@@ -1729,14 +1755,25 @@ class _PosScreenState extends ConsumerState<PosScreen> {
                 Container(
                   padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
                   decoration: BoxDecoration(
-                    color: AppColors.primaryLight.withValues(alpha: 0.3),
+                    color: (isStock ? const Color(0xFFFEF3C7) : AppColors.primaryLight).withValues(alpha: 0.5),
                     borderRadius: BorderRadius.circular(8),
                   ),
                   child: Row(
                     children: [
-                      const Icon(Icons.qr_code_rounded, size: 16, color: AppColors.primary),
+                      Icon(
+                        isStock ? Icons.inventory_2_rounded : Icons.qr_code_rounded,
+                        size: 16,
+                        color: isStock ? const Color(0xFFD97706) : AppColors.primary,
+                      ),
                       const SizedBox(width: 8),
-                      Text('Barcode: $barcode', style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 12, color: AppColors.primaryDark)),
+                      Text(
+                        'Barcode: $barcode • ${isStock ? "Stock Mode (+$quantity units)" : "Sale Mode"}',
+                        style: TextStyle(
+                          fontWeight: FontWeight.bold,
+                          fontSize: 12,
+                          color: isStock ? const Color(0xFFD97706) : AppColors.primaryDark,
+                        ),
+                      ),
                     ],
                   ),
                 ),
@@ -1790,6 +1827,15 @@ class _PosScreenState extends ConsumerState<PosScreen> {
                     ),
                   ],
                 ),
+                const SizedBox(height: 10),
+                TextField(
+                  controller: stockCtrl,
+                  decoration: InputDecoration(
+                    labelText: isStock ? 'Initial Stock Received *' : 'Initial Stock Count',
+                    isDense: true,
+                  ),
+                  keyboardType: TextInputType.number,
+                ),
               ],
             ),
           ),
@@ -1809,6 +1855,7 @@ class _PosScreenState extends ConsumerState<PosScreen> {
               final price = double.tryParse(priceCtrl.text.trim()) ?? 0.0;
               final cost = double.tryParse(costCtrl.text.trim()) ?? 0.0;
               final packSize = int.tryParse(packSizeCtrl.text.trim()) ?? 10;
+              final stock = int.tryParse(stockCtrl.text.trim()) ?? (isStock ? quantity : 50);
 
               final newMed = Medicine(
                 id: const Uuid().v4(),
@@ -1824,29 +1871,66 @@ class _PosScreenState extends ConsumerState<PosScreen> {
                 location: 'Main Rack',
                 defaultPrice: price,
                 defaultCostPrice: cost,
-                totalStock: 50,
+                totalStock: stock,
               );
 
               await ref.read(medicineRepoProvider).addMedicine(newMed);
-              ref.invalidate(medicinesListProvider);
 
-              // Auto-add newly registered product to active POS cart
-              ref.read(posCartProvider.notifier).addItem(
-                newMed,
-                isFullBox: !newMed.isTabletOrPack,
-                quantity: 1,
+              // Create initial batch so total_stock from batches table is populated
+              final initialBatch = Batch(
+                id: const Uuid().v4(),
+                medicineId: newMed.id,
+                batchNumber: 'INIT-${DateTime.now().millisecondsSinceEpoch.toString().substring(7)}',
+                expiryDate: DateTime.now().add(const Duration(days: 365)),
+                quantity: stock,
+                buyPrice: cost,
+                sellPrice: price,
+                receivedDate: DateTime.now(),
               );
+              await ref.read(inventoryRepoProvider).addBatch(initialBatch);
+
+              if (isStock) {
+                // In Stock Mode, write StockAdjustment audit log
+                final adjustment = StockAdjustment(
+                  id: const Uuid().v4(),
+                  medicineId: newMed.id,
+                  medicineName: newMed.name,
+                  quantityChange: stock,
+                  adjustmentType: 'Add',
+                  reason: 'Initial Stock (Mobile Scanner)',
+                  createdAt: DateTime.now(),
+                  notes: 'Created & restocked via mobile scanner ($stock units)',
+                );
+                await ref.read(inventoryRepoProvider).addStockAdjustment(adjustment, updateBatchQuantity: false);
+              } else {
+                // In Sale Mode, auto-add to active POS cart
+                ref.read(posCartProvider.notifier).addItem(
+                  newMed,
+                  isFullBox: !newMed.isTabletOrPack,
+                  quantity: 1,
+                );
+              }
+
+              ref.invalidate(medicinesListProvider);
+              ref.invalidate(allBatchesProvider);
+              ref.invalidate(dashboardStatsProvider);
+              ref.invalidate(stockAdjustmentsProvider);
 
               if (ctx.mounted) Navigator.of(ctx).pop();
               if (context.mounted) {
-                ToastHelper.showSuccess(context, 'Created and added ${newMed.name} to bill!');
+                ToastHelper.showSuccess(
+                  context,
+                  isStock
+                      ? 'Registered and restocked $stock units of ${newMed.name}!'
+                      : 'Created and added ${newMed.name} to bill!',
+                );
               }
             },
             style: ElevatedButton.styleFrom(
-              backgroundColor: AppColors.primary,
+              backgroundColor: isStock ? const Color(0xFFD97706) : AppColors.primary,
               foregroundColor: Colors.white,
             ),
-            child: const Text('Save & Add to Bill'),
+            child: Text(isStock ? 'Save & Restock' : 'Save & Add to Bill'),
           ),
         ],
       ),
