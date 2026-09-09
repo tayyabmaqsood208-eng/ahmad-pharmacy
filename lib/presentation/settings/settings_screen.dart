@@ -1,6 +1,5 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import 'package:file_picker/file_picker.dart';
 import '../../data/models/app_settings.dart';
 import '../../domain/providers/settings_provider.dart';
 import '../../domain/providers/medicine_provider.dart';
