@@ -20,6 +20,7 @@ import 'presentation/customers/customers_screen.dart';
 import 'presentation/reports/reports_screen.dart';
 import 'presentation/settings/settings_screen.dart';
 import 'presentation/scanner/scanner_screen.dart';
+import 'presentation/mobile/mobile_shell_screen.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -71,33 +72,45 @@ class MainShellScreen extends ConsumerWidget {
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
-    final navState = ref.watch(navigationProvider);
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final isMobilePlatform = !kIsWeb && (Platform.isAndroid || Platform.isIOS);
+        final isNarrowScreen = constraints.maxWidth < 768;
 
-    return Scaffold(
-      body: Row(
-        children: [
-          // Pinned Left Sidebar Navigation
-          const SidebarNavigation(),
+        // Dedicated Mobile Shell (QR Scanner, Stock, and Bill) for mobile phones & narrow screens
+        if (isMobilePlatform || isNarrowScreen) {
+          return const MobileShellScreen();
+        }
 
-          // Main Screen Body Container
-          Expanded(
-            child: Column(
-              children: [
-                // Top Header Bar
-                const TopAppBar(),
+        final navState = ref.watch(navigationProvider);
 
-                // Active Module View Screen
-                Expanded(
-                  child: AnimatedSwitcher(
-                    duration: const Duration(milliseconds: 200),
-                    child: _buildCurrentScreen(navState.currentScreen),
-                  ),
+        return Scaffold(
+          body: Row(
+            children: [
+              // Pinned Left Sidebar Navigation
+              const SidebarNavigation(),
+
+              // Main Screen Body Container
+              Expanded(
+                child: Column(
+                  children: [
+                    // Top Header Bar
+                    const TopAppBar(),
+
+                    // Active Module View Screen
+                    Expanded(
+                      child: AnimatedSwitcher(
+                        duration: const Duration(milliseconds: 200),
+                        child: _buildCurrentScreen(navState.currentScreen),
+                      ),
+                    ),
+                  ],
                 ),
-              ],
-            ),
+              ),
+            ],
           ),
-        ],
-      ),
+        );
+      },
     );
   }
 

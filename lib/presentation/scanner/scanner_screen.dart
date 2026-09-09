@@ -140,77 +140,80 @@ class _ScannerScreenState extends ConsumerState<ScannerScreen> {
     final clientState = ref.watch(scannerClientProvider);
     final isDark = Theme.of(context).brightness == Brightness.dark;
 
+    if (!_isCameraSupported || _scannerController == null) {
+      return Scaffold(
+        backgroundColor: isDark ? AppColors.bodyDarkBg : const Color(0xFFF8FAFC),
+        body: SafeArea(
+          child: _buildDesktopConsole(context, isDark, clientState),
+        ),
+      );
+    }
+
     return Scaffold(
       backgroundColor: Colors.black,
       body: SafeArea(
         child: Stack(
           children: [
-            // 1. Camera Viewfinder (or Desktop Simulation Console)
-            if (_isCameraSupported && _scannerController != null)
-              Positioned.fill(
-                child: MobileScanner(
-                  controller: _scannerController!,
-                  onDetect: _onBarcodeDetected,
-                ),
-              )
-            else
-              Positioned.fill(
-                child: _buildDesktopConsole(isDark, clientState),
+            // 1. Camera Viewfinder
+            Positioned.fill(
+              child: MobileScanner(
+                controller: _scannerController!,
+                onDetect: _onBarcodeDetected,
               ),
+            ),
 
             // 2. Scan Reticle Overlay (Active when camera is running)
-            if (_isCameraSupported)
-              Positioned.fill(
-                child: IgnorePointer(
-                  child: Center(
-                    child: Container(
-                      width: 280,
-                      height: clientState.isConnected ? 160 : 260,
-                      decoration: BoxDecoration(
-                        border: Border.all(
-                          color: clientState.isConnected
-                              ? (clientState.selectedMode == ScannerMode.stock ? Colors.amber : AppColors.success)
-                              : AppColors.primary,
-                          width: 2.5,
+            Positioned.fill(
+              child: IgnorePointer(
+                child: Center(
+                  child: Container(
+                    width: 280,
+                    height: clientState.isConnected ? 160 : 260,
+                    decoration: BoxDecoration(
+                      border: Border.all(
+                        color: clientState.isConnected
+                            ? (clientState.selectedMode == ScannerMode.stock ? Colors.amber : AppColors.success)
+                            : AppColors.primary,
+                        width: 2.5,
+                      ),
+                      borderRadius: BorderRadius.circular(16),
+                    ),
+                    child: Stack(
+                      children: [
+                        Center(
+                          child: Container(
+                            height: 1.5,
+                            color: (clientState.isConnected
+                                    ? (clientState.selectedMode == ScannerMode.stock ? Colors.amber : AppColors.success)
+                                    : AppColors.primary)
+                                .withValues(alpha: 0.7),
+                          ),
                         ),
-                        borderRadius: BorderRadius.circular(16),
-                      ),
-                      child: Stack(
-                        children: [
-                          Center(
-                            child: Container(
-                              height: 1.5,
-                              color: (clientState.isConnected
-                                      ? (clientState.selectedMode == ScannerMode.stock ? Colors.amber : AppColors.success)
-                                      : AppColors.primary)
-                                  .withValues(alpha: 0.7),
+                        Positioned(
+                          bottom: 8,
+                          left: 0,
+                          right: 0,
+                          child: Text(
+                            !clientState.isConnected
+                                ? 'Scan POS pairing QR code'
+                                : (clientState.selectedMode == ScannerMode.stock
+                                    ? 'Stock Mode: Scan to add +${clientState.stockQuantity} units'
+                                    : 'Sale Mode: Scan to add to bill'),
+                            textAlign: TextAlign.center,
+                            style: const TextStyle(
+                              color: Colors.white,
+                              fontSize: 11,
+                              fontWeight: FontWeight.bold,
+                              shadows: [Shadow(color: Colors.black, blurRadius: 4)],
                             ),
                           ),
-                          Positioned(
-                            bottom: 8,
-                            left: 0,
-                            right: 0,
-                            child: Text(
-                              !clientState.isConnected
-                                  ? 'Scan POS pairing QR code'
-                                  : (clientState.selectedMode == ScannerMode.stock
-                                      ? 'Stock Mode: Scan to add +${clientState.stockQuantity} units'
-                                      : 'Sale Mode: Scan to add to bill'),
-                              textAlign: TextAlign.center,
-                              style: const TextStyle(
-                                color: Colors.white,
-                                fontSize: 11,
-                                fontWeight: FontWeight.bold,
-                                shadows: [Shadow(color: Colors.black, blurRadius: 4)],
-                              ),
-                            ),
-                          ),
-                        ],
-                      ),
+                        ),
+                      ],
                     ),
                   ),
                 ),
               ),
+            ),
 
             // 3. Top Floating App Bar & Mode Switcher
             Positioned(
@@ -924,104 +927,98 @@ class _ScannerScreenState extends ConsumerState<ScannerScreen> {
     );
   }
 
-  /// Fallback display when run on Desktop (Windows) where camera hardware is not active
-  Widget _buildDesktopConsole(bool isDark, ScannerClientState clientState) {
+  /// Clean, scrollable display when run on Desktop (Windows) where camera hardware is not active
+  Widget _buildDesktopConsole(BuildContext context, bool isDark, ScannerClientState clientState) {
     final isStock = clientState.selectedMode == ScannerMode.stock;
 
-    return Container(
-      color: isDark ? const Color(0xFF0F172A) : const Color(0xFFF8FAFC),
-      padding: const EdgeInsets.all(24),
+    return SingleChildScrollView(
+      padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 16),
       child: Center(
-        child: Container(
-          constraints: const BoxConstraints(maxWidth: 460),
-          padding: const EdgeInsets.all(24),
-          decoration: BoxDecoration(
-            color: isDark ? AppColors.cardDarkBg : Colors.white,
-            borderRadius: BorderRadius.circular(20),
-            border: Border.all(color: AppColors.border),
-          ),
+        child: ConstrainedBox(
+          constraints: const BoxConstraints(maxWidth: 580),
           child: Column(
-            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
-              Icon(
-                isStock ? Icons.inventory_2_rounded : Icons.stay_current_portrait_rounded,
-                color: isStock ? const Color(0xFFD97706) : AppColors.primary,
-                size: 50,
-              ),
-              const SizedBox(height: 12),
-              Text(
-                isStock ? 'Mobile Scanner (Stock Restock Mode)' : 'Mobile Scanner (POS Sale Mode)',
-                style: const TextStyle(fontSize: 17, fontWeight: FontWeight.bold),
-              ),
-              const SizedBox(height: 4),
-              Text(
-                isStock
-                    ? 'Simulate stock receiving scan: adds quantity directly to inventory DB.'
-                    : 'Simulate sale scan: resolves medicine and adds to active billing cart.',
-                textAlign: TextAlign.center,
-                style: const TextStyle(fontSize: 12, color: AppColors.textSecondary),
+              _buildTopBar(context, clientState),
+              const SizedBox(height: 10),
+              _buildModeSelector(clientState),
+              if (isStock && clientState.isConnected) ...[
+                const SizedBox(height: 10),
+                _buildStockQuantityBar(clientState),
+              ],
+              const SizedBox(height: 16),
+
+              // Simulation Barcode Terminal Card
+              Container(
+                padding: const EdgeInsets.all(22),
+                decoration: BoxDecoration(
+                  color: isDark ? AppColors.cardDarkBg : Colors.white,
+                  borderRadius: BorderRadius.circular(16),
+                  border: Border.all(color: isDark ? AppColors.borderDark : AppColors.border),
+                  boxShadow: [
+                    BoxShadow(color: Colors.black.withValues(alpha: 0.04), blurRadius: 8),
+                  ],
+                ),
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Icon(
+                      isStock ? Icons.inventory_2_rounded : Icons.stay_current_portrait_rounded,
+                      color: isStock ? const Color(0xFFD97706) : AppColors.primary,
+                      size: 44,
+                    ),
+                    const SizedBox(height: 10),
+                    Text(
+                      isStock ? 'Desktop Scanner (Stock Restock Mode)' : 'Desktop Scanner (POS Sale Mode)',
+                      style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
+                    ),
+                    const SizedBox(height: 4),
+                    Text(
+                      isStock
+                          ? 'Simulate stock receiving scan: adds quantity directly to inventory DB.'
+                          : 'Simulate sale scan: resolves medicine and adds to active billing cart.',
+                      textAlign: TextAlign.center,
+                      style: const TextStyle(fontSize: 11, color: AppColors.textSecondary),
+                    ),
+                    const SizedBox(height: 16),
+
+                    // Barcode input
+                    TextField(
+                      controller: _manualBarcodeController,
+                      decoration: InputDecoration(
+                        hintText: isStock
+                            ? 'Enter barcode to restock (+${clientState.stockQuantity} units)...'
+                            : 'Enter test barcode or SKU...',
+                        prefixIcon: const Icon(Icons.barcode_reader, size: 20),
+                        contentPadding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+                      ),
+                      onSubmitted: (_) => _handleManualBarcodeSubmit(),
+                    ),
+                    const SizedBox(height: 12),
+                    SizedBox(
+                      width: double.infinity,
+                      child: ElevatedButton.icon(
+                        onPressed: _handleManualBarcodeSubmit,
+                        icon: const Icon(Icons.send_rounded, size: 16),
+                        label: Text(
+                          isStock
+                              ? 'Simulate Restock Scan (+${clientState.stockQuantity} Units)'
+                              : 'Simulate Sale Cart Scan',
+                        ),
+                        style: ElevatedButton.styleFrom(
+                          backgroundColor: isStock ? const Color(0xFFD97706) : AppColors.primary,
+                          foregroundColor: Colors.white,
+                          padding: const EdgeInsets.symmetric(vertical: 12),
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
               ),
               const SizedBox(height: 16),
 
-              // Mode Switcher buttons in Desktop test console
-              Row(
-                children: [
-                  Expanded(
-                    child: OutlinedButton.icon(
-                      onPressed: () => ref.read(scannerClientProvider.notifier).setMode(ScannerMode.sale),
-                      icon: const Icon(Icons.shopping_cart_rounded, size: 14),
-                      label: const Text('Sale Mode', style: TextStyle(fontSize: 12)),
-                      style: OutlinedButton.styleFrom(
-                        backgroundColor: !isStock ? AppColors.primaryLight : null,
-                        foregroundColor: !isStock ? AppColors.primary : AppColors.textSecondary,
-                        side: BorderSide(color: !isStock ? AppColors.primary : AppColors.border),
-                      ),
-                    ),
-                  ),
-                  const SizedBox(width: 10),
-                  Expanded(
-                    child: OutlinedButton.icon(
-                      onPressed: () => ref.read(scannerClientProvider.notifier).setMode(ScannerMode.stock),
-                      icon: const Icon(Icons.inventory_2_rounded, size: 14),
-                      label: const Text('Stock Mode', style: TextStyle(fontSize: 12)),
-                      style: OutlinedButton.styleFrom(
-                        backgroundColor: isStock ? const Color(0xFFFEF3C7) : null,
-                        foregroundColor: isStock ? const Color(0xFFD97706) : AppColors.textSecondary,
-                        side: BorderSide(color: isStock ? const Color(0xFFD97706) : AppColors.border),
-                      ),
-                    ),
-                  ),
-                ],
-              ),
-              const SizedBox(height: 14),
-
-              // Test barcode input
-              TextField(
-                controller: _manualBarcodeController,
-                decoration: InputDecoration(
-                  hintText: isStock ? 'Enter barcode to restock (+${clientState.stockQuantity})...' : 'Enter test barcode or SKU...',
-                  prefixIcon: const Icon(Icons.barcode_reader, size: 20),
-                ),
-                onSubmitted: (_) => _handleManualBarcodeSubmit(),
-              ),
-              const SizedBox(height: 12),
-              SizedBox(
-                width: double.infinity,
-                child: ElevatedButton.icon(
-                  onPressed: _handleManualBarcodeSubmit,
-                  icon: const Icon(Icons.send_rounded, size: 16),
-                  label: Text(
-                    isStock
-                        ? 'Simulate Restock Scan (+${clientState.stockQuantity} Units)'
-                        : 'Simulate Sale Cart Scan',
-                  ),
-                  style: ElevatedButton.styleFrom(
-                    backgroundColor: isStock ? const Color(0xFFD97706) : AppColors.primary,
-                    foregroundColor: Colors.white,
-                    padding: const EdgeInsets.symmetric(vertical: 12),
-                  ),
-                ),
-              ),
+              // Recent Scans Feed & Connection Tools
+              _buildBottomPanel(context, clientState, isDark),
             ],
           ),
         ),
